@@ -1,37 +1,38 @@
 package main
 
 import (
-	"time"
-
 	"backend-arisankita/internal/handlers"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	router := gin.Default()
+	r := gin.Default()
 
-	// CORS untuk React (Port 5173)
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
-
-	// Grouping REST API v1
-	v1 := router.Group("/api/v1")
+	v1 := r.Group("/api/v1")
 	{
-		circles := v1.Group("/circles")
-		{
-			circles.GET("", handlers.GetCircles)            // GET  /api/v1/circles
-			circles.POST("/:id/bids", handlers.SubmitBid)   // POST /api/v1/circles/ARK-101/bids
-			circles.POST("/:id/spin", handlers.SpinWheel)   // POST /api/v1/circles/ARK-101/spin
-		}
+		// Auth
+		v1.POST("/auth/register", handlers.Register)
+		v1.POST("/auth/login", handlers.Login)
+
+		// Kelompok Arisan
+		v1.POST("/groups", handlers.CreateGroup)
+		v1.GET("/groups/:id", handlers.GetGroupDetail)
+		v1.POST("/groups/:id/join", handlers.JoinGroup)
+
+		// Pembayaran
+		v1.POST("/payments", handlers.SubmitPayment)
+		v1.GET("/payments/group/:id", handlers.GetGroupPayments)
+		v1.PATCH("/payments/:id/verify", handlers.VerifyPayment)
+
+		// Pengocokan
+		v1.GET("/draws/group/:id", handlers.GetGroupDraws)
+
+		// Endpoint Lama (Circle/Spin)
+		v1.GET("/circles", handlers.GetCircles)
+		v1.POST("/circles/:id/bids", handlers.SubmitBid)
+		v1.POST("/circles/:id/spin", handlers.SpinWheel)
 	}
 
-	router.Run(":8080")
+	r.Run(":8080")
 }
