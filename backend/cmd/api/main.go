@@ -1,38 +1,92 @@
 package main
 
 import (
-	"backend-arisankita/internal/handlers"
+	"log"
+	"os"
 
+	"backend-arisankita/internal/config"
+	"backend-arisankita/internal/handlers"
+	"backend-arisankita/internal/middleware"
+
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// Inisialisasi Database Pool (Supabase PostgreSQL via pgxpool)
+	// Jika DATABASE_URL belum di-set di .env, sistem tetap jalan dalam mode mock
+	db := config.InitDB()
+	if db != nil {
+		defer config.CloseDB()
+	}
+
 	r := gin.Default()
+
+	// CORS Setup untuk Frontend React Vite
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	r.Use(cors.New(corsConfig))
 
 	v1 := r.Group("/api/v1")
 	{
-		// Auth
-		v1.POST("/auth/register", handlers.Register)
-		v1.POST("/auth/login", handlers.Login)
+		// -------------------------------------------------------------
+		// Track 1: Auth & User Profile (Anggota 1)
+		// -------------------------------------------------------------
+		auth := v1.Group("/auth")
+		{
+			auth.POST("/register", handlers.Register)
+			auth.POST("/login", handlers.Login)
+		}
 
-		// Kelompok Arisan
-		v1.POST("/groups", handlers.CreateGroup)
-		v1.GET("/groups/:id", handlers.GetGroupDetail)
-		v1.POST("/groups/:id/join", handlers.JoinGroup)
+		users := v1.Group("/users")
+		users.Use(middleware.AuthMiddleware())
+		{
+			users.GET("/profile", handlers.GetProfile)
+			users.PUT("/profile", handlers.UpdateProfile)
+		}
 
-		// Pembayaran
-		v1.POST("/payments", handlers.SubmitPayment)
-		v1.GET("/payments/group/:id", handlers.GetGroupPayments)
-		v1.PATCH("/payments/:id/verify", handlers.VerifyPayment)
+		// -------------------------------------------------------------
+		// Track 2: Kelompok Arisan / Circle Hub (Anggota 2)
+		// -------------------------------------------------------------
+		groups := v1.Group("/groups")
+		{
+			groups.POST("", handlers.CreateGroup)
+			groups.GET("/:id", handlers.GetGroupDetail)
+			groups.POST("/:id/join", handlers.JoinGroup)
+		}
 
-		// Pengocokan
-		v1.GET("/draws/group/:id", handlers.GetGroupDraws)
+		// -------------------------------------------------------------
+		// Track 3: Pembayaran & Core Engine Pengocokan (Anggota 3)
+		// -------------------------------------------------------------
+		payments := v1.Group("/payments")
+		{
+			payments.POST("", handlers.SubmitPayment)
+			payments.GET("/group/:id", handlers.GetGroupPayments)
+			payments.PATCH("/:id/verify", handlers.VerifyPayment)
+		}
 
-		// Endpoint Lama (Circle/Spin)
-		v1.GET("/circles", handlers.GetCircles)
-		v1.POST("/circles/:id/bids", handlers.SubmitBid)
-		v1.POST("/circles/:id/spin", handlers.SpinWheel)
+		draws := v1.Group("/draws")
+		{
+			draws.GET("/group/:id", handlers.GetGroupDraws)
+		}
+
+		// Endpoint Circle/Spin Legacy
+		circles := v1.Group("/circles")
+		{
+			circles.GET("", handlers.GetCircles)
+			circles.POST("/:id/bids", handlers.SubmitBid)
+			circles.POST("/:id/spin", handlers.SpinWheel)
+		}
 	}
 
-	r.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("[INFO] Server ArisanKita backend berjalan di port :%s", port)
+	if err := r.Run(":" + port); err != nil {
+		log.Fatalf("[FATAL] Gagal menjalankan server: %v", err)
+	}
 }
