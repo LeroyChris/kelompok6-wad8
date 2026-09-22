@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import PaymentModal from "../components/PaymentModal";
 import {
   Copy,
@@ -111,10 +111,7 @@ export interface DashboardProps {
 
 /* ─── Main Component ─── */
 export default function Dashboard({
-  onBack       = () => {},
   onNavigate,
-  embedded,
-  onOpenPayment,
 }: DashboardProps) {
   const [copiedCode, setCopiedCode]   = useState(false);
   const [reminded, setReminded]       = useState<Record<number, boolean>>({});

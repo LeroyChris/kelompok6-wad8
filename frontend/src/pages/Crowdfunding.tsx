@@ -85,9 +85,6 @@ export interface CrowdfundingProps {
 /* ─── Main Component ─── */
 export default function Crowdfunding({
   onBack               = () => {},
-  onNavigateToAuction,
-  onNavigateToSpin,
-  embedded,
 }: CrowdfundingProps) {
   /* UI state */
   const [showCreateModal, setCreateModal] = useState(false);

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Disc, HandCoins, FileCheck2, Trophy, Users, History,
+  Disc, FileCheck2, Trophy, Users, History,
   CheckCircle2, Clock, Gavel, Lock, ArrowLeft, ShieldAlert,
   Sparkles, Phone,
 } from 'lucide-react';
@@ -87,18 +87,6 @@ function TrackAGuard({ onNavigateToAuction }: { onNavigateToAuction?: () => void
 }
 
 /* ─── Avatar Stack ─── */
-function Avatar({ initials, color, size = 'md' }: { initials: string; color: string; size?: 'sm' | 'md' | 'lg' }) {
-  const sz = size === 'sm' ? 'w-7 h-7 text-[10px]' : size === 'lg' ? 'w-16 h-16 text-lg' : 'w-9 h-9 text-xs';
-  return (
-    <div
-      className={`${sz} rounded-full flex items-center justify-center font-black text-white shrink-0 ring-2 ring-white`}
-      style={{ background: `linear-gradient(135deg, ${color}dd, ${color})` }}
-    >
-      {initials}
-    </div>
-  );
-}
-
 /* ─── Props ─── */
 export interface SpinWheelProps {
   onBack:               () => void;
@@ -116,7 +104,6 @@ export default function SpinWheel({
   userRole            = 'leader',
   duesPct             = 100,
   onNavigateToAuction,
-  embedded,
 }: SpinWheelProps) {
   const [wheelState, setWheelState]   = useState<WheelState>('idle');
   const [rotation, setRotation]       = useState(0);

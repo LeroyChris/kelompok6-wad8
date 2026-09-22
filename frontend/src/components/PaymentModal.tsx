@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type React from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X, Shield, Copy, Check, QrCode, Wallet, CreditCard,
-  Clock, ChevronDown, Download, ExternalLink, RefreshCw,
-  CheckCircle2, AlertCircle, Zap,
+  Clock, Download, ExternalLink, RefreshCw,
+  CheckCircle2, Zap,
 } from 'lucide-react';
 
 /* ─── Types ─── */

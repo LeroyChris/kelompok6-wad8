@@ -174,9 +174,6 @@ export interface AuditTrailProps {
 /* ─── Main Component ─── */
 export default function AuditTrail({
   onBack                = () => {},
-  onNavigateToAuction,
-  onNavigateToCrowdfund,
-  embedded,
 }: AuditTrailProps) {
   const [filter, setFilter]             = useState<FilterKey>('all');
   const [searchQ, setSearchQ]           = useState('');

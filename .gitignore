@@ -1,0 +1,26 @@
+# OS & Editor
+.DS_Store
+*.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Go
+backend/main
+backend/*.exe
+backend/*.test
+go.work
+go.work.sum
+
+# Environment
+.env
+backend/.env
+frontend/.env
+*.env.local
+
+# Node & Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/

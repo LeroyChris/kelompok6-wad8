@@ -240,7 +240,6 @@ export interface AuctionRoomProps {
 export default function AuctionRoom({
   onBack    = () => {},
   trackType = 'A',
-  embedded,
 }: AuctionRoomProps) {
   const [confirmBid, setConfirmBid]     = useState<number | null>(null);
   const [submitted, setSubmitted]       = useState(false);

@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
-  Shield, ChevronDown, Table2, Gavel, HandCoins, FileCheck2, Disc,
+  Shield, ChevronDown, Table2, Gavel, Disc,
   X, CheckCircle2, Clock, AlertCircle, AlertTriangle, Search,
   Download, ArrowLeft, CreditCard, RefreshCw, Check,
   MessageCircle, Hash, ExternalLink,
