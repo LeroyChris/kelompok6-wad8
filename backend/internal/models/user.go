@@ -2,7 +2,6 @@ package models
 
 import "time"
 
-// User merepresentasikan entitas tabel users (BAB 5.3)
 // Pegangan: Anggota 1 (Auth & User Profile)
 type User struct {
 	UserID          string    `json:"user_id"`
