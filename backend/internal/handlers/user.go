@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 
+	"backend-arisankita/internal/dto"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,35 +15,58 @@ type UpdateProfileInput struct {
 	NewPassword string `json:"new_password"`
 }
 
-// GET /api/v1/users/profile
+// GET /api/v1/users/me & GET /api/v1/users/profile
 func GetProfile(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data": gin.H{
-			"id":           userID,
-			"name":         "Farrel Abda",
-			"email":        "farrel@example.com",
-			"phone_number": "081234567890",
-		},
-	})
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Profil berhasil diambil", gin.H{
+		"user_id":          userID,
+		"full_name":        "Farrel Abda",
+		"email":            "farrel@arisankita.id",
+		"phone_number":     "081234567890",
+		"account_status":   "ACTIVE",
+		"wallet_balance":   5000000,
+		"total_won_count":  1,
+		"total_amount_won": 2000000,
+	}))
 }
 
-// PUT /api/v1/users/profile
+// PATCH /api/v1/users/me & PUT /api/v1/users/profile
 func UpdateProfile(c *gin.Context) {
 	var input UpdateProfileInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "Profil dan password berhasil diperbarui",
-		"data": gin.H{
-			"name":         input.Name,
-			"phone_number": input.PhoneNumber,
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Profil berhasil diperbarui", gin.H{
+		"full_name":    input.Name,
+		"phone_number": input.PhoneNumber,
+	}))
+}
+
+// GET /api/v1/users/me/win-history
+func GetWinHistory(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Riwayat kemenangan arisan", []gin.H{
+		{
+			"award_id":                 "awd11111-0001-0000-0000-000000000001",
+			"circle_id":                "aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			"circle_name":              "Arisan Keluarga RT 05",
+			"cycle_number":             1,
+			"award_method":             "RANDOM_DRAW",
+			"gross_amount":             2000000,
+			"winning_bid_rate_percent": nil,
+			"payable_bid_rate_percent": nil,
+			"won_at":                   "2026-09-15T10:00:00Z",
 		},
-	})
+	}))
+}
+
+// GET /api/v1/users/me/reputation
+func GetUserReputation(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Poin reputasi", gin.H{
+		"reputation_score": 100,
+		"badge":            "STARTER",
+		"history":          []gin.H{},
+	}))
 }

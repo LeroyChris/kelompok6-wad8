@@ -14,7 +14,6 @@ import (
 
 func main() {
 	// Inisialisasi Database Pool (Supabase PostgreSQL via pgxpool)
-	// Jika DATABASE_URL belum di-set di .env, sistem tetap jalan dalam mode mock
 	db := config.InitDB()
 	if db != nil {
 		defer config.CloseDB()
@@ -31,10 +30,13 @@ func main() {
 	v1 := r.Group("/api/v1")
 	{
 		// -------------------------------------------------------------
-		// Track 1: Auth & User Profile (Anggota 1)
+		// Modul 2.1: Autentikasi & Identitas Pengguna (Track 1)
 		// -------------------------------------------------------------
 		auth := v1.Group("/auth")
 		{
+			auth.POST("/otp/request", handlers.RequestOTP)
+			auth.POST("/otp/verify", handlers.VerifyOTP)
+			auth.POST("/google", handlers.GoogleAuth)
 			auth.POST("/register", handlers.Register)
 			auth.POST("/login", handlers.Login)
 		}
@@ -42,13 +44,65 @@ func main() {
 		users := v1.Group("/users")
 		users.Use(middleware.AuthMiddleware())
 		{
+			users.GET("/me", handlers.GetProfile)
+			users.PATCH("/me", handlers.UpdateProfile)
+			users.GET("/me/win-history", handlers.GetWinHistory)
+			users.GET("/me/reputation", handlers.GetUserReputation)
+
+			// Legacy alias untuk kompatibilitas frontend
 			users.GET("/profile", handlers.GetProfile)
 			users.PUT("/profile", handlers.UpdateProfile)
 		}
 
 		// -------------------------------------------------------------
-		// Track 2: Kelompok Arisan / Circle Hub (Anggota 2)
+		// Modul In-App Wallet (Track 1)
 		// -------------------------------------------------------------
+		wallet := v1.Group("/wallet")
+		wallet.Use(middleware.AuthMiddleware())
+		{
+			wallet.GET("", handlers.GetWallet)
+			wallet.GET("/transactions", handlers.GetWalletTransactions)
+			wallet.POST("/topup", handlers.TopUpWallet)
+		}
+
+		// -------------------------------------------------------------
+		// Modul 2.2: Rekening Bank & Validasi (Track 1)
+		// -------------------------------------------------------------
+		bankAccounts := v1.Group("/bank-accounts")
+		bankAccounts.Use(middleware.AuthMiddleware())
+		{
+			bankAccounts.POST("", handlers.AddBankAccount)
+			bankAccounts.GET("", handlers.GetBankAccounts)
+			bankAccounts.DELETE("/:id", handlers.DeleteBankAccount)
+		}
+
+		// -------------------------------------------------------------
+		// Modul 2.3: Manajemen Circle & Keanggotaan (Track 2)
+		// -------------------------------------------------------------
+		circles := v1.Group("/circles")
+		{
+			circles.POST("", handlers.CreateCircle)
+			circles.POST("/join", handlers.JoinCircle)
+			circles.GET("", handlers.GetCircles)
+			circles.GET("/:id", handlers.GetCircleDetail)
+			circles.POST("/:id/lock", handlers.LockCircle)
+			circles.POST("/:id/invitations", handlers.CreateInvitation)
+			circles.GET("/:id/members", handlers.GetCircleMembers)
+
+			// Relasi Siklus per Circle
+			circles.GET("/:id/cycles", handlers.GetCircleCycles)
+
+			// Legacy spin & bids di circle level
+			circles.POST("/:id/bids", handlers.SubmitBid)
+			circles.POST("/:id/spin", handlers.SpinWheel)
+		}
+
+		invitations := v1.Group("/invitations")
+		{
+			invitations.POST("/join", handlers.JoinCircle)
+		}
+
+		// Legacy alias /groups untuk frontend
 		groups := v1.Group("/groups")
 		{
 			groups.POST("", handlers.CreateGroup)
@@ -57,27 +111,45 @@ func main() {
 		}
 
 		// -------------------------------------------------------------
-		// Track 3: Pembayaran & Core Engine Pengocokan (Anggota 3)
+		// Modul 2.4 & 2.5: Siklus Arisan, Partisipan & Mesin Lelang/Kocok (Track 3)
 		// -------------------------------------------------------------
-		payments := v1.Group("/payments")
+		cycles := v1.Group("/cycles")
 		{
-			payments.POST("", handlers.SubmitPayment)
-			payments.GET("/group/:id", handlers.GetGroupPayments)
-			payments.PATCH("/:id/verify", handlers.VerifyPayment)
+			cycles.GET("/:id", handlers.GetCycleDetail)
+			cycles.GET("/:id/participants", handlers.GetCycleParticipants)
+			cycles.GET("/:id/obligations", handlers.GetCycleObligations)
+			cycles.POST("/:id/bids", handlers.SubmitCycleBid)
+			cycles.POST("/:id/draw", handlers.ExecuteCycleDraw)
+			cycles.GET("/:id/award", handlers.GetCycleAward)
 		}
 
+		// Legacy alias /draws
 		draws := v1.Group("/draws")
 		{
 			draws.GET("/group/:id", handlers.GetGroupDraws)
 		}
 
-		// Endpoint Circle/Spin Legacy
-		circles := v1.Group("/circles")
+		// -------------------------------------------------------------
+		// Modul 2.6: Pembayaran Tagihan & Bukti Transaksi (Track 3)
+		// -------------------------------------------------------------
+		obligations := v1.Group("/obligations")
 		{
-			circles.GET("", handlers.GetCircles)
-			circles.POST("/:id/bids", handlers.SubmitBid)
-			circles.POST("/:id/spin", handlers.SpinWheel)
+			obligations.POST("/:id/pay", handlers.PayObligation)
 		}
+
+		payments := v1.Group("/payments")
+		{
+			payments.GET("/:id", handlers.GetPaymentDetail)
+			payments.POST("/:id/proof", handlers.UploadPaymentProof)
+
+			// Legacy aliases
+			payments.POST("", handlers.SubmitPayment)
+			payments.GET("/group/:id", handlers.GetGroupPayments)
+			payments.PATCH("/:id/verify", handlers.VerifyPayment)
+		}
+
+		v1.POST("/payment-proofs/:id/review", handlers.ReviewPaymentProof)
+		v1.POST("/webhooks/payment-gateway", handlers.HandlePaymentGatewayWebhook)
 	}
 
 	port := os.Getenv("PORT")

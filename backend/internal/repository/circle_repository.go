@@ -9,15 +9,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// CircleRepository menangani query Raw SQL untuk tabel circles & circle_members
-// Pegangan: Anggota 2 (Circle & Membership)
+// CircleRepository menangani query Raw SQL untuk tabel circles, circle_memberships, circle_invitations
+// Pegangan: Anggota 2 (Circle Hub & Membership)
 type CircleRepository interface {
 	CreateCircle(ctx context.Context, circle *models.Circle) error
 	FindByID(ctx context.Context, circleID string) (*models.Circle, error)
-	FindByInviteCode(ctx context.Context, code string) (*models.Circle, error)
-	AddMember(ctx context.Context, member *models.CircleMember) error
-	GetMembers(ctx context.Context, circleID string) ([]models.CircleMember, error)
+	AddMembership(ctx context.Context, membership *models.CircleMembership) error
+	GetMemberships(ctx context.Context, circleID string) ([]models.CircleMembership, error)
 	UpdateStatus(ctx context.Context, circleID string, status string) error
+	CreateInvitation(ctx context.Context, invite *models.CircleInvitation) error
+	FindInvitationByHash(ctx context.Context, codeHash string) (*models.CircleInvitation, error)
 }
 
 type circleRepository struct {
@@ -29,31 +30,34 @@ func NewCircleRepository(db *pgxpool.Pool) CircleRepository {
 }
 
 func (r *circleRepository) CreateCircle(ctx context.Context, circle *models.Circle) error {
-	// TODO (Anggota 2): Tulis query Raw SQL INSERT INTO circles ...
+	// Query ada di docs/sql/002_core_queries.sql No. 1
 	return errors.New("not implemented")
 }
 
 func (r *circleRepository) FindByID(ctx context.Context, circleID string) (*models.Circle, error) {
-	// TODO (Anggota 2): Tulis query Raw SQL SELECT FROM circles WHERE circle_id = $1
+	// Query ada di docs/sql/002_core_queries.sql No. 3
 	return nil, errors.New("not implemented")
 }
 
-func (r *circleRepository) FindByInviteCode(ctx context.Context, code string) (*models.Circle, error) {
-	// TODO (Anggota 2): Tulis query Raw SQL SELECT FROM circles WHERE invite_code = $1
-	return nil, errors.New("not implemented")
-}
-
-func (r *circleRepository) AddMember(ctx context.Context, member *models.CircleMember) error {
-	// TODO (Anggota 2): Tulis query Raw SQL INSERT INTO circle_members ...
+func (r *circleRepository) AddMembership(ctx context.Context, membership *models.CircleMembership) error {
+	// Query ada di docs/sql/002_core_queries.sql No. 2
 	return errors.New("not implemented")
 }
 
-func (r *circleRepository) GetMembers(ctx context.Context, circleID string) ([]models.CircleMember, error) {
-	// TODO (Anggota 2): Tulis query Raw SQL SELECT FROM circle_members WHERE circle_id = $1
+func (r *circleRepository) GetMemberships(ctx context.Context, circleID string) ([]models.CircleMembership, error) {
 	return nil, errors.New("not implemented")
 }
 
 func (r *circleRepository) UpdateStatus(ctx context.Context, circleID string, status string) error {
-	// TODO (Anggota 2): Tulis query Raw SQL UPDATE circles SET circle_status = $1 WHERE circle_id = $2
 	return errors.New("not implemented")
+}
+
+func (r *circleRepository) CreateInvitation(ctx context.Context, invite *models.CircleInvitation) error {
+	// Query ada di docs/sql/002_core_queries.sql No. 4
+	return errors.New("not implemented")
+}
+
+func (r *circleRepository) FindInvitationByHash(ctx context.Context, codeHash string) (*models.CircleInvitation, error) {
+	// Query ada di docs/sql/002_core_queries.sql No. 5
+	return nil, errors.New("not implemented")
 }
