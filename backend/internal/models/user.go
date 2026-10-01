@@ -11,6 +11,10 @@ type User struct {
 	AccountStatus string    `json:"account_status"` // ACTIVE, SUSPENDED, DEACTIVATED
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	// Field tambahan untuk menampung ringkasan profil & kemenangan
+	WalletBalance  float64 `json:"wallet_balance"`
+	TotalWonCount  int     `json:"total_won_count"`
+	TotalAmountWon float64 `json:"total_amount_won"`
 }
 
 // UserAuthIdentity merepresentasikan entitas tabel user_auth_identities
