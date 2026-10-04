@@ -1,17 +1,19 @@
 package handlers
 
 import (
-	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type WalletHandler struct {
-	DB *sql.DB
+	DB *pgxpool.Pool
 }
 
-func NewWalletHandler(db *sql.DB) *WalletHandler {
+func NewWalletHandler(db *pgxpool.Pool) *WalletHandler {
 	return &WalletHandler{DB: db}
 }
 
@@ -47,14 +49,25 @@ func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
 	query := `SELECT id AS wallet_id, user_id, balance, updated_at FROM user_wallets WHERE user_id = $1;`
 
 	var wallet WalletResponse
-	err := h.DB.QueryRowContext(c.Request.Context(), query, userID).Scan(&wallet.WalletID, &wallet.UserID, &wallet.Balance, &wallet.UpdatedAt)
+	var updatedAtTime interface{}
+	err := h.DB.QueryRow(c.Request.Context(), query, userID).Scan(
+		&wallet.WalletID,
+		&wallet.UserID,
+		&wallet.Balance,
+		&updatedAtTime,
+	)
+
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Dompet tidak ditemukan"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mengambil data saldo"})
 		return
+	}
+
+	if t, ok := updatedAtTime.(interface{ String() string }); ok {
+		wallet.UpdatedAt = t.String()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "Saldo berhasil didapatkan", "data": wallet})
@@ -76,7 +89,7 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 		ORDER BY wt.created_at DESC;
 	`
 
-	rows, err := h.DB.QueryContext(c.Request.Context(), query, userID)
+	rows, err := h.DB.Query(c.Request.Context(), query, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mengambil transaksi"})
 		return
@@ -86,9 +99,21 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 	transactions := make([]WalletTransactionItem, 0)
 	for rows.Next() {
 		var item WalletTransactionItem
-		if err := rows.Scan(&item.ID, &item.WalletID, &item.TransactionType, &item.MutationType, &item.Amount, &item.Description, &item.CreatedAt); err != nil {
+		var createdAtTime interface{}
+		if err := rows.Scan(
+			&item.ID,
+			&item.WalletID,
+			&item.TransactionType,
+			&item.MutationType,
+			&item.Amount,
+			&item.Description,
+			&createdAtTime,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memproses transaksi"})
 			return
+		}
+		if t, ok := createdAtTime.(interface{ String() string }); ok {
+			item.CreatedAt = t.String()
 		}
 		transactions = append(transactions, item)
 	}
@@ -111,17 +136,17 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	tx, err := h.DB.BeginTx(ctx, nil)
+	tx, err := h.DB.Begin(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memulai transaksi"})
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
 
 	var walletID string
 	var newBalance float64
 	updateQuery := `UPDATE user_wallets SET balance = balance + $1, updated_at = NOW() WHERE user_id = $2 RETURNING id, balance;`
-	err = tx.QueryRowContext(ctx, updateQuery, req.Amount, userID).Scan(&walletID, &newBalance)
+	err = tx.QueryRow(ctx, updateQuery, req.Amount, userID).Scan(&walletID, &newBalance)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memperbarui saldo"})
 		return
@@ -131,13 +156,13 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 		INSERT INTO wallet_transactions (wallet_id, transaction_type, mutation_type, amount, description, created_at)
 		VALUES ($1, 'TOPUP', 'CREDIT', $2, 'Top-up saldo sandbox testing', NOW());
 	`
-	_, err = tx.ExecContext(ctx, insertQuery, walletID, req.Amount)
+	_, err = tx.Exec(ctx, insertQuery, walletID, req.Amount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mencatat mutasi"})
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menyelesaikan top-up"})
 		return
 	}

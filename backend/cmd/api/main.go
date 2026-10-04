@@ -27,6 +27,11 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
+	// Inisialisasi Handler Instances
+	userHandler := handlers.NewUserHandler(db)
+	walletHandler := handlers.NewWalletHandler(db)
+	bankHandler := handlers.NewBankAccountHandler(db)
+
 	v1 := r.Group("/api/v1")
 	{
 		// -------------------------------------------------------------
@@ -44,13 +49,13 @@ func main() {
 		users := v1.Group("/users")
 		users.Use(middleware.AuthMiddleware())
 		{
-			users.GET("/me", handlers.GetProfile)
-			users.PATCH("/me", handlers.UpdateProfile)
-			users.GET("/me/win-history", handlers.GetWinHistory)
+			users.GET("/me", userHandler.GetUserProfile)
+			users.PATCH("/me", handlers.UpdateProfile) // Tetap memanggil fungsi handler umum/helper
+			users.GET("/me/win-history", userHandler.GetWinHistory)
 			users.GET("/me/reputation", handlers.GetUserReputation)
 
 			// Legacy alias untuk kompatibilitas frontend
-			users.GET("/profile", handlers.GetProfile)
+			users.GET("/profile", userHandler.GetUserProfile)
 			users.PUT("/profile", handlers.UpdateProfile)
 		}
 
@@ -60,9 +65,9 @@ func main() {
 		wallet := v1.Group("/wallet")
 		wallet.Use(middleware.AuthMiddleware())
 		{
-			wallet.GET("", handlers.GetWallet)
-			wallet.GET("/transactions", handlers.GetWalletTransactions)
-			wallet.POST("/topup", handlers.TopUpWallet)
+			wallet.GET("", walletHandler.GetWalletBalance)
+			wallet.GET("/transactions", walletHandler.GetWalletTransactions)
+			wallet.POST("/topup", walletHandler.TopUpWallet)
 		}
 
 		// -------------------------------------------------------------
@@ -71,9 +76,9 @@ func main() {
 		bankAccounts := v1.Group("/bank-accounts")
 		bankAccounts.Use(middleware.AuthMiddleware())
 		{
-			bankAccounts.POST("", handlers.AddBankAccount)
-			bankAccounts.GET("", handlers.GetBankAccounts)
-			bankAccounts.DELETE("/:id", handlers.DeleteBankAccount)
+			bankAccounts.POST("", bankHandler.CreateBankAccount)
+			bankAccounts.GET("", bankHandler.GetBankAccounts)
+			bankAccounts.DELETE("/:id", bankHandler.DeleteBankAccount)
 		}
 
 		// -------------------------------------------------------------
