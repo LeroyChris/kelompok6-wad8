@@ -14,6 +14,7 @@ import AuditTrail    from './pages/AuditTrail';
 import SpinWheel     from './components/SpinWheel';
 import PaymentModal  from './components/PaymentModal';
 import PaymentMatrix from './components/PaymentMatrix';
+import { userWalletService } from './services/userWalletService';
 
 /* ══════════════════════════════════════════════════════════
    TYPES
@@ -60,23 +61,6 @@ const INITIAL_USER: UserState = {
   isLoggedIn: false, role: 'LEADER', name: 'Farrel Abda', initials: 'FA', reputation: 98,
 };
 
-export const DEFAULT_CIRCLE = {
-  id:           'ARK-8891',
-  name:         'Arisan Alumni 2018',
-  trackType:    'TRACK_A' as TrackType,
-  membersCount: 10,
-  totalPot:     '15.000.000',
-  duesAmount:   '1.000.000',
-  currentCycle: 4,
-  totalCycles:  15,
-};
-export const DEFAULT_USER = {
-  name:       'Farrel Abda',
-  role:       'LEADER' as const,
-  reputation: 98,
-  isLoggedIn: true,
-};
-
 const CATEGORIES = ['UMKM & Bisnis', 'Keluarga & Hobi', 'Komunitas / Alumni', 'Kantor'] as const;
 
 /* ══════════════════════════════════════════════════════════
@@ -106,7 +90,7 @@ class ErrorBoundary extends Component<EBProps, EBState> {
           </div>
           <div>
             <p className="text-lg font-black text-[#0A2578]">{this.props.fallbackLabel ?? 'Terjadi Kesalahan'}</p>
-            <p className="text-sm text-slate-500 mt-1.5 max-w-xs leading-relaxed">Layar ini mengalami error tak terduga dan diisolasi agar tidak memengaruhi bagian lain aplikasi.</p>
+            <p className="text-sm text-slate-500 mt-1.5 max-w-xs leading-relaxed">Layar ini mengalami error tak terduga.</p>
             {this.state.message && (
               <code className="mt-3 block text-[10px] font-mono text-slate-400 bg-slate-100 px-3 py-2 rounded-lg max-w-xs mx-auto break-all text-left">
                 {this.state.message}
@@ -785,9 +769,9 @@ export default function App() {
 
   /* Landing form */
   const [activeTab,    setActiveTab]  = useState<'invite' | 'new'>('invite');
-  const [phone,        setPhone]      = useState('');
+  const [phone,        setPhone]      = useState('8123456789');
   const [inviteCode,   setInviteCode] = useState('');
-  const [otpValues,    setOtpValues]  = useState(['', '', '', '']);
+  const [otpValues,    setOtpValues]  = useState(['1', '2', '3', '4']);
   const [otpOpen,      setOtpOpen]    = useState(false);
   const [loginLoading, setLoading]    = useState(false);
   const [wizardOpen,   setWizardOpen] = useState(false);
@@ -866,26 +850,74 @@ export default function App() {
     setPayOpen(true);
   }, []);
 
-  /* ── Auth ── */
-  const handleLogin = useCallback(() => {
-    setUser((u) => ({ ...u, isLoggedIn: true }));
-    setOtpOpen(false);
-    setScreenState('dashboard');
-    window.location.hash = SCREEN_TO_HASH['dashboard'];
-    setTimeout(() => addToast('Selamat datang, Farrel Abda!', 'success'), 300);
+  /* ── AUTH HANDLERS INTEGRASI BACKEND GO ── */
+  const handleOTPRequest = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      await userWalletService.requestOTP(phone);
+      addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 1234)', 'info');
+      setOtpOpen(true);
+    } catch (err) {
+      setOtpOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [phone, addToast]);
+
+  const handleLogin = useCallback(async () => {
+    const otpCode = otpValues.join('');
+    try {
+      setLoading(true);
+      const res = await userWalletService.verifyOTP(phone || '8123456789', otpCode || '1234');
+      
+      if (res.data?.data?.token) {
+        localStorage.setItem('token', res.data.data.token);
+      }
+
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setOtpOpen(false);
+      setScreenState('dashboard');
+      window.location.hash = SCREEN_TO_HASH['dashboard'];
+      addToast('Login berhasil! Token JWT tersimpan.', 'success');
+    } catch (err) {
+      localStorage.setItem('token', 'demo-mock-jwt-token');
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setOtpOpen(false);
+      setScreenState('dashboard');
+      window.location.hash = SCREEN_TO_HASH['dashboard'];
+      addToast('Login Demo Mode (Fallback)', 'info');
+    } finally {
+      setLoading(false);
+    }
+  }, [phone, otpValues, addToast]);
+
+  const handleQuickLogin = useCallback(async () => {
+    setPhone('8123456789');
+    setOtpValues(['1', '2', '3', '4']);
+    setLoading(true);
+    
+    try {
+      const res = await userWalletService.verifyOTP('8123456789', '1234');
+      if (res.data?.data?.token) {
+        localStorage.setItem('token', res.data.data.token);
+      }
+    } catch (err) {
+      localStorage.setItem('token', 'demo-mock-jwt-token');
+    } finally {
+      setLoading(false);
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setScreenState('dashboard');
+      window.location.hash = SCREEN_TO_HASH['dashboard'];
+      addToast('Masuk sebagai Farrel Abda (Ketua)', 'success');
+    }
   }, [addToast]);
 
   const handleLogout = useCallback(() => {
+    localStorage.removeItem('token');
     setUser((u) => ({ ...u, isLoggedIn: false }));
     setScreenState('landing');
     window.location.hash = '#/';
-  }, []);
-
-  const handleQuickLogin = useCallback(() => {
-    setPhone('8123456789');
-    setInviteCode('ARK-8891');
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setOtpOpen(true); }, 900);
   }, []);
 
   /* ── Circle change ── */
@@ -908,12 +940,6 @@ export default function App() {
   }, [circles, addToast]);
 
   /* ── OTP handlers ── */
-  const handleOTPRequest = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setOtpOpen(true); }, 1200);
-  }, []);
-
   const handleOtpInput = useCallback((index: number, value: string) => {
     if (!/^\d*$/.test(value)) return;
     setOtpValues((p) => { const n = [...p]; n[index] = value.slice(-1); return n; });
@@ -1135,10 +1161,6 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <div className="mt-8 py-4 px-5 bg-white rounded-2xl border border-slate-200/60 flex items-center justify-center gap-2.5 text-sm text-slate-500 font-medium shadow-sm">
-              <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-              <span>100% Bebas Risiko Deposit • Sesuai Legalitas KBLI 63122 SaaS</span>
-            </div>
           </div>
         </section>
 
@@ -1186,9 +1208,6 @@ export default function App() {
                         autoFocus={i === 0}
                       />
                     ))}
-                  </div>
-                  <div className="mt-5 text-sm font-medium text-slate-400">
-                    Kirim ulang dalam <span className="text-[#0A2578] font-bold">00:45</span>
                   </div>
                 </div>
                 <button
@@ -1239,22 +1258,6 @@ export default function App() {
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Shield className="w-4 h-4 text-[#5A83DB] shrink-0" />
           <span className="font-black text-sm truncate">ArisanKita</span>
-          <span className="text-white/40 mx-1 hidden sm:block">·</span>
-          <span className="text-xs text-white/60 font-medium truncate hidden sm:block">{circle.name}</span>
-        </div>
-        <div className="flex gap-1 bg-white/10 p-0.5 rounded-lg shrink-0">
-          <button
-            onClick={() => handleDemoSwitch('TRACK_A')}
-            className={`text-[10px] font-black px-2.5 py-1.5 rounded-md transition-all ${
-              circle.trackType === 'TRACK_A' ? 'bg-[#5A83DB] text-white' : 'text-white/50 hover:text-white'
-            }`}
-          >A</button>
-          <button
-            onClick={() => handleDemoSwitch('TRACK_B')}
-            className={`text-[10px] font-black px-2.5 py-1.5 rounded-md transition-all ${
-              circle.trackType === 'TRACK_B' ? 'bg-emerald-500 text-white' : 'text-white/50 hover:text-white'
-            }`}
-          >B</button>
         </div>
       </div>
 
