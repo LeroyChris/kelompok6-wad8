@@ -50,13 +50,13 @@ func main() {
 		users.Use(middleware.AuthMiddleware())
 		{
 			users.GET("/me", userHandler.GetUserProfile)
-			users.PATCH("/me", handlers.UpdateProfile) // Tetap memanggil fungsi handler umum/helper
+			users.PATCH("/me", userHandler.UpdateProfile)
 			users.GET("/me/win-history", userHandler.GetWinHistory)
-			users.GET("/me/reputation", handlers.GetUserReputation)
+			users.GET("/me/reputation", userHandler.GetUserReputation)
 
-			// Legacy alias untuk kompatibilitas frontend
+			// Legacy alias
 			users.GET("/profile", userHandler.GetUserProfile)
-			users.PUT("/profile", handlers.UpdateProfile)
+			users.PUT("/profile", userHandler.UpdateProfile)
 		}
 
 		// -------------------------------------------------------------

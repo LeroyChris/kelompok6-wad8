@@ -37,3 +37,23 @@ type CreateCrowdfundingRequest struct {
 type ContributeCrowdfundingRequest struct {
 	Amount float64 `json:"amount" binding:"required,gt=0"`
 }
+
+// DTO untuk Update Profil User
+type UpdateProfileRequest struct {
+	FullName    string `json:"full_name"`
+	PhoneNumber string `json:"phone_number"`
+	AvatarURL   string `json:"avatar_url"`
+}
+
+// DTO untuk Top-Up Saldo Sandbox
+type TopUpRequest struct {
+	Amount float64 `json:"amount" binding:"required,gt=0"`
+}
+
+// DTO untuk Rekening Bank User
+type CreateBankAccountRequest struct {
+	BankName      string `json:"bank_name" binding:"required"`
+	AccountNumber string `json:"account_number" binding:"required"`
+	AccountHolder string `json:"account_holder" binding:"required"`
+	IsPrimary     bool   `json:"is_primary"`
+}
