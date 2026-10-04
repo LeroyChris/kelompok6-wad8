@@ -4,65 +4,150 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type AddBankAccountInput struct {
-	Provider           string `json:"provider" binding:"required"`
-	AccountType        string `json:"account_type" binding:"required"` // BANK, E_WALLET
-	AccountNumber      string `json:"account_number" binding:"required"`
-	AuthorizationType  string `json:"authorization_type"`             // SELF, FAMILY_AUTHORIZED
+type BankAccountHandler struct {
+	DB *pgxpool.Pool
 }
 
-// POST /api/v1/bank-accounts
-func AddBankAccount(c *gin.Context) {
-	var input AddBankAccountInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
+func NewBankAccountHandler(db *pgxpool.Pool) *BankAccountHandler {
+	return &BankAccountHandler{DB: db}
+}
+
+type BankAccountItem struct {
+	ID            string `json:"id"`
+	UserID        string `json:"user_id"`
+	BankName      string `json:"bank_name"`
+	AccountNumber string `json:"account_number"`
+	AccountHolder string `json:"account_holder"`
+	IsPrimary     bool   `json:"is_primary"`
+	CreatedAt     string `json:"created_at"`
+}
+
+type CreateBankAccountRequest struct {
+	BankName      string `json:"bank_name" binding:"required"`
+	AccountNumber string `json:"account_number" binding:"required"`
+	AccountHolder string `json:"account_holder" binding:"required"`
+	IsPrimary     bool   `json:"is_primary"`
+}
+
+// GetBankAccounts - GET /api/v1/bank-accounts
+func (h *BankAccountHandler) GetBankAccounts(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Pengguna tidak terautentikasi"})
 		return
 	}
 
-	userID, _ := c.Get("userID")
+	query := `
+		SELECT id, user_id, bank_name, account_number, account_holder, is_primary, created_at
+		FROM user_bank_accounts
+		WHERE user_id = $1
+		ORDER BY is_primary DESC, created_at DESC;
+	`
 
-	c.JSON(http.StatusCreated, gin.H{
-		"status":  "success",
-		"message": "Rekening berhasil didaftarkan",
-		"data": gin.H{
-			"bank_account_id":       "ba-uuid-001",
-			"user_id":               userID,
-			"provider":              input.Provider,
-			"account_type":          input.AccountType,
-			"account_number_masked": "****" + input.AccountNumber[max(0, len(input.AccountNumber)-4):],
-			"validation_status":     "PENDING",
-			"authorization_type":    input.AuthorizationType,
-		},
-	})
+	rows, err := h.DB.Query(c.Request.Context(), query, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mengambil data rekening bank"})
+		return
+	}
+	defer rows.Close()
+
+	accounts := make([]BankAccountItem, 0)
+	for rows.Next() {
+		var acc BankAccountItem
+		var createdAtTime interface{}
+		if err := rows.Scan(
+			&acc.ID,
+			&acc.UserID,
+			&acc.BankName,
+			&acc.AccountNumber,
+			&acc.AccountHolder,
+			&acc.IsPrimary,
+			&createdAtTime,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memproses data rekening"})
+			return
+		}
+		if t, ok := createdAtTime.(interface{ String() string }); ok {
+			acc.CreatedAt = t.String()
+		}
+		accounts = append(accounts, acc)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success", "data": accounts})
 }
 
-// GET /api/v1/bank-accounts
-func GetBankAccounts(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status": "success",
-		"data": []gin.H{
-			{
-				"bank_account_id":       "ba-uuid-001",
-				"provider":              "BCA",
-				"account_type":          "BANK",
-				"account_number_masked": "******1234",
-				"validation_status":     "MATCHED",
-				"authorization_type":    "SELF",
-			},
-		},
-	})
+// AddBankAccount / CreateBankAccount - POST /api/v1/bank-accounts
+func (h *BankAccountHandler) AddBankAccount(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Pengguna tidak terautentikasi"})
+		return
+	}
+
+	var req CreateBankAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Data rekening tidak valid"})
+		return
+	}
+
+	query := `
+		INSERT INTO user_bank_accounts (user_id, bank_name, account_number, account_holder, is_primary, created_at)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		RETURNING id, created_at;
+	`
+
+	var acc BankAccountItem
+	acc.UserID = userID
+	acc.BankName = req.BankName
+	acc.AccountNumber = req.AccountNumber
+	acc.AccountHolder = req.AccountHolder
+	acc.IsPrimary = req.IsPrimary
+
+	var createdAtTime interface{}
+	err := h.DB.QueryRow(c.Request.Context(), query, userID, req.BankName, req.AccountNumber, req.AccountHolder, req.IsPrimary).Scan(
+		&acc.ID,
+		&createdAtTime,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menambahkan rekening bank"})
+		return
+	}
+
+	if t, ok := createdAtTime.(interface{ String() string }); ok {
+		acc.CreatedAt = t.String()
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"status": "success", "message": "Rekening bank berhasil ditambahkan", "data": acc})
 }
 
-// DELETE /api/v1/bank-accounts/:id
-func DeleteBankAccount(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "Rekening berhasil dihapus",
-		"data": gin.H{
-			"bank_account_id": id,
-		},
-	})
+// DeleteBankAccount - DELETE /api/v1/bank-accounts/:id
+func (h *BankAccountHandler) DeleteBankAccount(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Pengguna tidak terautentikasi"})
+		return
+	}
+
+	accountID := c.Param("id")
+
+	query := `DELETE FROM user_bank_accounts WHERE id = $1 AND user_id = $2;`
+	res, err := h.DB.Exec(c.Request.Context(), query, accountID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menghapus rekening bank"})
+		return
+	}
+
+	if res.RowsAffected() == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Rekening bank tidak ditemukan atau bukan milik Anda"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "Rekening bank berhasil dihapus"})
+}
+
+func (h *BankAccountHandler) CreateBankAccount(c *gin.Context) {
+	h.AddBankAccount(c)
 }
