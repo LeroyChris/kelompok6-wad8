@@ -3,6 +3,9 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"time"
+
+	"backend-arisankita/internal/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -17,28 +20,7 @@ func NewWalletHandler(db *pgxpool.Pool) *WalletHandler {
 	return &WalletHandler{DB: db}
 }
 
-type WalletResponse struct {
-	WalletID  string  `json:"wallet_id"`
-	UserID    string  `json:"user_id"`
-	Balance   float64 `json:"balance"`
-	UpdatedAt string  `json:"updated_at"`
-}
-
-type WalletTransactionItem struct {
-	ID              string  `json:"id"`
-	WalletID        string  `json:"wallet_id"`
-	TransactionType string  `json:"transaction_type"`
-	MutationType    string  `json:"mutation_type"`
-	Amount          float64 `json:"amount"`
-	Description     string  `json:"description"`
-	CreatedAt       string  `json:"created_at"`
-}
-
-type TopUpRequest struct {
-	Amount float64 `json:"amount" binding:"required,gt=0"`
-}
-
-// GET /api/v1/wallet
+// GetWalletBalance - GET /api/v1/wallet
 func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
@@ -48,8 +30,8 @@ func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
 
 	query := `SELECT id AS wallet_id, user_id, balance, updated_at FROM user_wallets WHERE user_id = $1;`
 
-	var wallet WalletResponse
-	var updatedAtTime interface{}
+	var wallet dto.WalletResponse
+	var updatedAtTime time.Time
 	err := h.DB.QueryRow(c.Request.Context(), query, userID).Scan(
 		&wallet.WalletID,
 		&wallet.UserID,
@@ -66,14 +48,12 @@ func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
 		return
 	}
 
-	if t, ok := updatedAtTime.(interface{ String() string }); ok {
-		wallet.UpdatedAt = t.String()
-	}
+	wallet.UpdatedAt = updatedAtTime.Format(time.RFC3339)
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "Saldo berhasil didapatkan", "data": wallet})
 }
 
-// GET /api/v1/wallet/transactions
+// GetWalletTransactions - GET /api/v1/wallet/transactions
 func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
@@ -96,10 +76,10 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	transactions := make([]WalletTransactionItem, 0)
+	transactions := make([]dto.WalletTransactionItem, 0)
 	for rows.Next() {
-		var item WalletTransactionItem
-		var createdAtTime interface{}
+		var item dto.WalletTransactionItem
+		var createdAtTime time.Time
 		if err := rows.Scan(
 			&item.ID,
 			&item.WalletID,
@@ -112,16 +92,14 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memproses transaksi"})
 			return
 		}
-		if t, ok := createdAtTime.(interface{ String() string }); ok {
-			item.CreatedAt = t.String()
-		}
+		item.CreatedAt = createdAtTime.Format(time.RFC3339)
 		transactions = append(transactions, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "data": transactions})
 }
 
-// POST /api/v1/wallet/topup
+// TopUpWallet - POST /api/v1/wallet/topup
 func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
@@ -129,7 +107,7 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 		return
 	}
 
-	var req TopUpRequest
+	var req dto.TopUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Jumlah top-up harus berupa angka positif"})
 		return
@@ -145,10 +123,18 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 
 	var walletID string
 	var newBalance float64
-	updateQuery := `UPDATE user_wallets SET balance = balance + $1, updated_at = NOW() WHERE user_id = $2 RETURNING id, balance;`
-	err = tx.QueryRow(ctx, updateQuery, req.Amount, userID).Scan(&walletID, &newBalance)
+
+	// Query UPSERT: Membuat row dompet baru jika belum ada, atau menambah balance jika sudah ada
+	upsertQuery := `
+		INSERT INTO user_wallets (user_id, balance, updated_at)
+		VALUES ($2, $1, NOW())
+		ON CONFLICT (user_id) 
+		DO UPDATE SET balance = user_wallets.balance + $1, updated_at = NOW()
+		RETURNING id, balance;
+	`
+	err = tx.QueryRow(ctx, upsertQuery, req.Amount, userID).Scan(&walletID, &newBalance)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memperbarui saldo"})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memperbarui saldo dompet"})
 		return
 	}
 
@@ -158,7 +144,7 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 	`
 	_, err = tx.Exec(ctx, insertQuery, walletID, req.Amount)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mencatat mutasi"})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal mencatat mutasi transaksi"})
 		return
 	}
 

@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"net/http"
+	"time"
+
+	"backend-arisankita/internal/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,23 +16,6 @@ type BankAccountHandler struct {
 
 func NewBankAccountHandler(db *pgxpool.Pool) *BankAccountHandler {
 	return &BankAccountHandler{DB: db}
-}
-
-type BankAccountItem struct {
-	ID            string `json:"id"`
-	UserID        string `json:"user_id"`
-	BankName      string `json:"bank_name"`
-	AccountNumber string `json:"account_number"`
-	AccountHolder string `json:"account_holder"`
-	IsPrimary     bool   `json:"is_primary"`
-	CreatedAt     string `json:"created_at"`
-}
-
-type CreateBankAccountRequest struct {
-	BankName      string `json:"bank_name" binding:"required"`
-	AccountNumber string `json:"account_number" binding:"required"`
-	AccountHolder string `json:"account_holder" binding:"required"`
-	IsPrimary     bool   `json:"is_primary"`
 }
 
 // GetBankAccounts - GET /api/v1/bank-accounts
@@ -54,10 +40,10 @@ func (h *BankAccountHandler) GetBankAccounts(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	accounts := make([]BankAccountItem, 0)
+	accounts := make([]dto.BankAccountItem, 0)
 	for rows.Next() {
-		var acc BankAccountItem
-		var createdAtTime interface{}
+		var acc dto.BankAccountItem
+		var createdAtTime time.Time
 		if err := rows.Scan(
 			&acc.ID,
 			&acc.UserID,
@@ -70,9 +56,7 @@ func (h *BankAccountHandler) GetBankAccounts(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memproses data rekening"})
 			return
 		}
-		if t, ok := createdAtTime.(interface{ String() string }); ok {
-			acc.CreatedAt = t.String()
-		}
+		acc.CreatedAt = createdAtTime.Format(time.RFC3339)
 		accounts = append(accounts, acc)
 	}
 
@@ -87,7 +71,7 @@ func (h *BankAccountHandler) AddBankAccount(c *gin.Context) {
 		return
 	}
 
-	var req CreateBankAccountRequest
+	var req dto.CreateBankAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Data rekening tidak valid"})
 		return
@@ -99,14 +83,14 @@ func (h *BankAccountHandler) AddBankAccount(c *gin.Context) {
 		RETURNING id, created_at;
 	`
 
-	var acc BankAccountItem
+	var acc dto.BankAccountItem
 	acc.UserID = userID
 	acc.BankName = req.BankName
 	acc.AccountNumber = req.AccountNumber
 	acc.AccountHolder = req.AccountHolder
 	acc.IsPrimary = req.IsPrimary
 
-	var createdAtTime interface{}
+	var createdAtTime time.Time
 	err := h.DB.QueryRow(c.Request.Context(), query, userID, req.BankName, req.AccountNumber, req.AccountHolder, req.IsPrimary).Scan(
 		&acc.ID,
 		&createdAtTime,
@@ -116,9 +100,7 @@ func (h *BankAccountHandler) AddBankAccount(c *gin.Context) {
 		return
 	}
 
-	if t, ok := createdAtTime.(interface{ String() string }); ok {
-		acc.CreatedAt = t.String()
-	}
+	acc.CreatedAt = createdAtTime.Format(time.RFC3339)
 
 	c.JSON(http.StatusCreated, gin.H{"status": "success", "message": "Rekening bank berhasil ditambahkan", "data": acc})
 }
