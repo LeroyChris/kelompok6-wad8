@@ -18,6 +18,9 @@ type UserRepository interface {
 	// Query 1.5 & 1.6 untuk Fitur Wallet (Track 1)
 	GetUserWalletByID(ctx context.Context, userID string) (*models.UserWallet, error)
 	GetWalletTransactionsByUserID(ctx context.Context, userID string) ([]models.WalletTransaction, error)
+
+	// Query 1.7 Top-Up Saldo Sandbox (Track 1)
+	TopUpBalanceSandbox(ctx context.Context, userID string, amount float64) error
 }
 
 type userRepository struct {
@@ -181,4 +184,19 @@ func (r *userRepository) GetWalletTransactionsByUserID(ctx context.Context, user
 	}
 
 	return transactions, nil
+}
+
+// 1.7 Top-up Saldo Sandbox (POST /api/v1/wallet/topup-sandbox)
+func (r *userRepository) TopUpBalanceSandbox(ctx context.Context, userID string, amount float64) error {
+	query := `
+		UPDATE user_wallets 
+		SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP 
+		WHERE user_id = $2;
+	`
+	_, err := r.db.Exec(ctx, query, amount, userID)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
