@@ -21,6 +21,9 @@ type UserRepository interface {
 
 	// Query 1.7 Top-Up Saldo Sandbox (Track 1)
 	TopUpBalanceSandbox(ctx context.Context, userID string, amount float64) error
+
+	// Query 1.2 Registrasi Identitas Autentikasi / OTP Mock (Track 1)
+	CreateAuthIdentity(ctx context.Context, userID, identityType, identifier string) error
 }
 
 type userRepository struct {
@@ -199,4 +202,14 @@ func (r *userRepository) TopUpBalanceSandbox(ctx context.Context, userID string,
 	}
 
 	return nil
+}
+
+// 1.2 Registrasi Identitas / OTP Mock
+func (r *userRepository) CreateAuthIdentity(ctx context.Context, userID, identityType, identifier string) error {
+	query := `
+		INSERT INTO user_auth_identities (user_id, identity_type, identifier)
+		VALUES ($1, $2, $3);
+	`
+	_, err := r.db.Exec(ctx, query, userID, identityType, identifier)
+	return err
 }
