@@ -2,18 +2,80 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"backend-arisankita/internal/dto"
+	"backend-arisankita/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+type DrawHandler struct {
+	drawService service.DrawService
+}
+
+func NewDrawHandler(drawService service.DrawService) *DrawHandler {
+	return &DrawHandler{drawService: drawService}
+}
 
 type BidInput struct {
 	BidRatePercent float64 `json:"bid_rate_percent" binding:"required"`
 }
 
+// GET /api/v1/cycles/:id/participants?page=1&page_size=10
+func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
+	cycleID := c.Param("id")
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	participants, meta, err := h.drawService.GetParticipantsPaginated(c.Request.Context(), cycleID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil partisipan: "+err.Error(), nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildPaginatedResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus "+cycleID, participants, meta))
+}
+
+// POST /api/v1/cycles/:id/draw (Track B Spin Wheel)
+func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
+	cycleID := c.Param("id")
+
+	result, err := h.drawService.ExecuteRandomDraw(c.Request.Context(), cycleID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pengundian acak berhasil dieksekusi", result))
+}
+
+// POST /api/v1/cycles/:id/bids (Track A Lelang SPSB)
+func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
+	cycleID := c.Param("id")
+	userID := c.GetString("user_id") // Diambil dari JWT Auth Middleware
+
+	var input BidInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input bid tidak valid: "+err.Error(), nil))
+		return
+	}
+
+	if err := h.drawService.SubmitBid(c.Request.Context(), cycleID, userID, input.BidRatePercent); err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Tawaran lelang berhasil diajukan ke database", gin.H{
+		"cycle_id":         cycleID,
+		"bid_rate_percent": input.BidRatePercent,
+		"bid_status":       "ACTIVE",
+	}))
+}
+
 // GET /api/v1/circles/:id/cycles
-func GetCircleCycles(c *gin.Context) {
+func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 	circleID := c.Param("id")
 	cycles := []gin.H{
 		{
@@ -35,7 +97,7 @@ func GetCircleCycles(c *gin.Context) {
 }
 
 // GET /api/v1/cycles/:id
-func GetCycleDetail(c *gin.Context) {
+func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 	cycleID := c.Param("id")
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", gin.H{
 		"cycle_id":     cycleID,
@@ -45,78 +107,22 @@ func GetCycleDetail(c *gin.Context) {
 	}))
 }
 
-// GET /api/v1/cycles/:id/participants
-func GetCycleParticipants(c *gin.Context) {
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus", []gin.H{
-		{"participant_id": "par-01", "name": "Farrel Abda", "status": "ELIGIBLE"},
-		{"participant_id": "par-02", "name": "Roy", "status": "ELIGIBLE"},
-		{"participant_id": "par-03", "name": "Faza", "status": "ELIGIBLE"},
-	}))
-}
-
 // GET /api/v1/cycles/:id/obligations
-func GetCycleObligations(c *gin.Context) {
+func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", []gin.H{
 		{"obligation_id": "ob-01", "participant_id": "par-01", "amount_due": 500000, "status": "PAID"},
 		{"obligation_id": "ob-02", "participant_id": "par-02", "amount_due": 500000, "status": "UNPAID"},
 	}))
 }
 
-// POST /api/v1/cycles/:id/bids
-func SubmitCycleBid(c *gin.Context) {
-	cycleID := c.Param("id")
-	var input BidInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input bid tidak valid: "+err.Error(), nil))
-		return
-	}
-
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Tawaran lelang berhasil diajukan", gin.H{
-		"cycle_id":         cycleID,
-		"bid_rate_percent": input.BidRatePercent,
-		"bid_status":       "ACTIVE",
-	}))
-}
-
-// POST /api/v1/cycles/:id/draw
-func ExecuteCycleDraw(c *gin.Context) {
-	cycleID := c.Param("id")
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pengundian acak berhasil dieksekusi", gin.H{
-		"award_id":             "awd-uuid-001",
-		"cycle_id":             cycleID,
-		"winner_name":          "Roy",
-		"award_method":         "RANDOM_DRAW",
-		"gross_amount":         5000000,
-		"random_seed_commitment": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-	}))
-}
-
 // GET /api/v1/cycles/:id/award
-func GetCycleAward(c *gin.Context) {
+func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 	cycleID := c.Param("id")
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang siklus", gin.H{
-		"award_id":      "awd-uuid-001",
-		"cycle_id":      cycleID,
-		"winner_name":   "Roy",
-		"award_method":  "RANDOM_DRAW",
-		"gross_amount":  5000000,
+		"award_id":     "awd-" + cycleID,
+		"cycle_id":     cycleID,
+		"winner_name":  "Roy",
+		"award_method": "RANDOM_DRAW",
+		"gross_amount": 5000000,
 	}))
-}
-
-// GET /api/v1/draws/group/:id (Legacy alias)
-func GetGroupDraws(c *gin.Context) {
-	groupID := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"status":   "success",
-		"group_id": groupID,
-		"data": []gin.H{
-			{
-				"draw_id":       "draw-uuid-901",
-				"period_number": 1,
-				"winner_name":   "Roy",
-				"total_won":     5000000,
-				"draw_date":     "2026-08-01T10:00:00Z",
-			},
-		},
-	})
 }

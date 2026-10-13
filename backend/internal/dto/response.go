@@ -1,20 +1,31 @@
 package dto
 
-// BaseResponse adalah struktur standar JSON output untuk seluruh API ArisanKita
-type BaseResponse struct {
-	Code    int         `json:"code"`
-	Status  string      `json:"status"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
+// MetaPagination menyimpan informasi pagination standar
+type MetaPagination struct {
+	CurrentPage int   `json:"current_page"`
+	PageSize    int   `json:"page_size"`
+	TotalItems  int64 `json:"total_items"`
+	TotalPages  int   `json:"total_pages"`
 }
 
-// BuildResponse membuat struct BaseResponse standar dengan 4 argumen
-func BuildResponse(code int, status string, message string, data interface{}) BaseResponse {
-	return BaseResponse{
-		Code:    code,
-		Status:  status,
-		Message: message,
-		Data:    data,
+// BuildResponse membuat format response JSON standar
+func BuildResponse(code int, status string, message string, data interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"code":    code,
+		"status":  status,
+		"message": message,
+		"data":    data,
+	}
+}
+
+// BuildPaginatedResponse membuat format response JSON dengan pagination
+func BuildPaginatedResponse(code int, status string, message string, data interface{}, meta MetaPagination) map[string]interface{} {
+	return map[string]interface{}{
+		"code":    code,
+		"status":  status,
+		"message": message,
+		"data":    data,
+		"meta":    meta,
 	}
 }
 
@@ -76,4 +87,32 @@ type BankAccountItem struct {
 	AccountHolder string `json:"account_holder"`
 	IsPrimary     bool   `json:"is_primary"`
 	CreatedAt     string `json:"created_at"`
+}
+
+// -----------------------------------------------------------------
+// DTO Response Models (Modul Circle, Draw & Bids)
+// -----------------------------------------------------------------
+
+type ParticipantResponse struct {
+	ParticipantID string `json:"participant_id"`
+	UserID        string `json:"user_id"`
+	Name          string `json:"name"`
+	Initials      string `json:"initials"`
+	Status        string `json:"status"`
+}
+
+type DrawResultResponse struct {
+	AwardID              string              `json:"award_id"`
+	CycleID              string              `json:"cycle_id"`
+	Winner               ParticipantResponse `json:"winner"`
+	WinnerName           string              `json:"winner_name"`
+	AwardMethod          string              `json:"award_method"`
+	GrossAmount          float64             `json:"gross_amount"`
+	RandomSeedCommitment string              `json:"random_seed_commitment"`
+}
+
+type BidResponse struct {
+	CycleID        string  `json:"cycle_id"`
+	BidRatePercent float64 `json:"bid_rate_percent"`
+	BidStatus      string  `json:"bid_status"`
 }
