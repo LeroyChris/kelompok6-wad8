@@ -7,6 +7,8 @@ import (
 	"backend-arisankita/internal/config"
 	"backend-arisankita/internal/handlers"
 	"backend-arisankita/internal/middleware"
+	"backend-arisankita/internal/repository"
+	"backend-arisankita/internal/service"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -27,10 +29,15 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
-	// Inisialisasi Handler Instances
+	// Inisialisasi Layer Repository -> Service -> Handler Instances
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
+
+	// Inisialisasi Module Draw & Cycle (Real Database Supabase)
+	drawRepo := repository.NewDrawRepository(db)
+	drawService := service.NewDrawService(drawRepo)
+	drawHandler := handlers.NewDrawHandler(drawService)
 
 	v1 := r.Group("/api/v1")
 	{
@@ -85,6 +92,7 @@ func main() {
 		// Modul 2.3: Manajemen Circle & Keanggotaan (Track 2)
 		// -------------------------------------------------------------
 		circles := v1.Group("/circles")
+		circles.Use(middleware.AuthMiddleware())
 		{
 			circles.POST("", handlers.CreateCircle)
 			circles.POST("/join", handlers.JoinCircle)
@@ -95,7 +103,7 @@ func main() {
 			circles.GET("/:id/members", handlers.GetCircleMembers)
 
 			// Relasi Siklus per Circle
-			circles.GET("/:id/cycles", handlers.GetCircleCycles)
+			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
 
 			// Legacy spin & bids di circle level
 			circles.POST("/:id/bids", handlers.SubmitBid)
@@ -103,12 +111,14 @@ func main() {
 		}
 
 		invitations := v1.Group("/invitations")
+		invitations.Use(middleware.AuthMiddleware())
 		{
 			invitations.POST("/join", handlers.JoinCircle)
 		}
 
 		// Legacy alias /groups untuk frontend
 		groups := v1.Group("/groups")
+		groups.Use(middleware.AuthMiddleware())
 		{
 			groups.POST("", handlers.CreateGroup)
 			groups.GET("/:id", handlers.GetGroupDetail)
@@ -119,17 +129,19 @@ func main() {
 		// Modul 2.4 & 2.5: Siklus Arisan, Partisipan & Mesin Lelang/Kocok (Track 3)
 		// -------------------------------------------------------------
 		cycles := v1.Group("/cycles")
+		cycles.Use(middleware.AuthMiddleware())
 		{
-			cycles.GET("/:id", handlers.GetCycleDetail)
-			cycles.GET("/:id/participants", handlers.GetCycleParticipants)
-			cycles.GET("/:id/obligations", handlers.GetCycleObligations)
-			cycles.POST("/:id/bids", handlers.SubmitCycleBid)
-			cycles.POST("/:id/draw", handlers.ExecuteCycleDraw)
-			cycles.GET("/:id/award", handlers.GetCycleAward)
+			cycles.GET("/:id", drawHandler.GetCycleDetail)
+			cycles.GET("/:id/participants", drawHandler.GetCycleParticipants)
+			cycles.GET("/:id/obligations", drawHandler.GetCycleObligations)
+			cycles.POST("/:id/bids", drawHandler.SubmitCycleBid)
+			cycles.POST("/:id/draw", drawHandler.ExecuteCycleDraw)
+			cycles.GET("/:id/award", drawHandler.GetCycleAward)
 		}
 
 		// Legacy alias /draws
 		draws := v1.Group("/draws")
+		draws.Use(middleware.AuthMiddleware())
 		{
 			draws.GET("/group/:id", handlers.GetGroupDraws)
 		}
@@ -138,11 +150,13 @@ func main() {
 		// Modul 2.6: Pembayaran Tagihan & Bukti Transaksi (Track 3)
 		// -------------------------------------------------------------
 		obligations := v1.Group("/obligations")
+		obligations.Use(middleware.AuthMiddleware())
 		{
 			obligations.POST("/:id/pay", handlers.PayObligation)
 		}
 
 		payments := v1.Group("/payments")
+		payments.Use(middleware.AuthMiddleware())
 		{
 			payments.GET("/:id", handlers.GetPaymentDetail)
 			payments.POST("/:id/proof", handlers.UploadPaymentProof)
@@ -153,7 +167,7 @@ func main() {
 			payments.PATCH("/:id/verify", handlers.VerifyPayment)
 		}
 
-		v1.POST("/payment-proofs/:id/review", handlers.ReviewPaymentProof)
+		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), handlers.ReviewPaymentProof)
 		v1.POST("/webhooks/payment-gateway", handlers.HandlePaymentGatewayWebhook)
 	}
 

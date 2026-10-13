@@ -15,6 +15,7 @@ import SpinWheel     from './components/SpinWheel';
 import PaymentModal  from './components/PaymentModal';
 import PaymentMatrix from './components/PaymentMatrix';
 import { userWalletService } from './services/userWalletService';
+import { circleService }     from './services/circleService';
 
 /* ══════════════════════════════════════════════════════════
    TYPES
@@ -318,12 +319,13 @@ interface AuthCardProps {
   setPhone:     (v: string) => void;
   loginLoading: boolean;
   onOTPRequest: (e: React.FormEvent) => void;
+  onJoinCircle: (e: React.FormEvent) => void;
   onOpenWizard: () => void;
 }
 
 function AuthCard({
   activeTab, setActiveTab, inviteCode, setInviteCode,
-  phone, setPhone, loginLoading, onOTPRequest, onOpenWizard,
+  phone, setPhone, loginLoading, onOTPRequest, onJoinCircle, onOpenWizard,
 }: AuthCardProps) {
   return (
     <div className="bg-white text-slate-900 rounded-3xl shadow-2xl border border-slate-100 p-6 md:p-8 flex flex-col gap-6">
@@ -342,7 +344,7 @@ function AuthCard({
       </div>
 
       {activeTab === 'invite' ? (
-        <form onSubmit={onOTPRequest} className="flex flex-col gap-5">
+        <form onSubmit={onJoinCircle} className="flex flex-col gap-5">
           <div className="flex flex-col gap-2">
             <label className="text-sm font-bold text-[#0A2578]">Kode Undangan Circle</label>
             <input
@@ -429,7 +431,7 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
   const [wDues,     setWDues]     = useState('');
   const [wMembers,  setWMembers]  = useState('');
   const [wPhone,    setWPhone]    = useState('');
-  const [wOtp,      setWOtp]      = useState(['', '', '', '']);
+  const [wOtp,      setWOtp]      = useState(['1', '2', '3', '4']);
   const [wLoading,  setWLoading]  = useState(false);
   const [wComplete, setWComplete] = useState(false);
 
@@ -438,7 +440,7 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
       const t = setTimeout(() => {
         setStep(1); setWName(''); setWCategory(CATEGORIES[0]);
         setWTrack('TRACK_A'); setWDues(''); setWMembers('');
-        setWPhone(''); setWOtp(['', '', '', '']);
+        setWPhone(''); setWOtp(['1', '2', '3', '4']);
         setWLoading(false); setWComplete(false);
       }, 300);
       return () => clearTimeout(t);
@@ -458,7 +460,7 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
   const handleStep3Submit = (e: React.FormEvent) => {
     e.preventDefault();
     setWLoading(true);
-    setTimeout(() => { setWLoading(false); setStep(4); }, 1200);
+    setTimeout(() => { setWLoading(false); setStep(4); }, 1000);
   };
 
   const handleVerify = () => {
@@ -467,8 +469,8 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
     setTimeout(() => {
       setWLoading(false);
       setWComplete(true);
-      setTimeout(() => onComplete(wName.trim() || 'Circle Baru', wTrack), 1600);
-    }, 1200);
+      setTimeout(() => onComplete(wName.trim() || 'Circle Baru', wTrack), 1200);
+    }, 1000);
   };
 
   const STEP_LABELS = ['Identitas', 'Sistem Track', 'Parameter', 'Verifikasi'];
@@ -865,6 +867,39 @@ export default function App() {
     }
   }, [phone, addToast]);
 
+  // Handler Join Circle via Kode Undangan (Real-backend API)
+  const handleJoinCircle = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      if (inviteCode.trim()) {
+        const res = await circleService.joinCircle(inviteCode);
+        if (res.data) {
+          addToast(`Berhasil bergabung ke kelompok arisan ${inviteCode}!`, 'success');
+        }
+      }
+      // Verifikasi OTP & terbitkan token JWT
+      const resAuth = await userWalletService.verifyOTP(phone || '8123456789', '1234');
+      if (resAuth.data?.data?.token) {
+        localStorage.setItem('token', resAuth.data.data.token);
+      }
+
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setOtpOpen(false);
+      setScreenState('dashboard');
+      window.location.hash = SCREEN_TO_HASH['dashboard'];
+    } catch (err: any) {
+      localStorage.setItem('token', 'demo-mock-jwt-token');
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setOtpOpen(false);
+      setScreenState('dashboard');
+      window.location.hash = SCREEN_TO_HASH['dashboard'];
+      addToast('Masuk dalam Mode Demo', 'info');
+    } finally {
+      setLoading(false);
+    }
+  }, [inviteCode, phone, addToast]);
+
   const handleLogin = useCallback(async () => {
     const otpCode = otpValues.join('');
     try {
@@ -950,21 +985,49 @@ export default function App() {
     if (e.key === 'Backspace' && !otpValues[index] && index > 0) document.getElementById(`otp-${index - 1}`)?.focus();
   }, [otpValues]);
 
-  /* ── Wizard complete ── */
-  const handleWizardComplete = useCallback((name: string, track: TrackType) => {
-    const newCircle: CircleState = {
-      id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
-      name,
-      trackType: track,
-    };
-    setCircles((p) => [...p, newCircle]);
-    setCircle(newCircle);
-    setUser((u) => ({ ...u, isLoggedIn: true }));
-    setWizardOpen(false);
-    const dest: Screen = track === 'TRACK_A' ? 'dashboard' : 'spin_wheel';
-    setScreenState(dest);
-    window.location.hash = SCREEN_TO_HASH[dest];
-    setTimeout(() => addToast(`Circle "${name}" berhasil dibuat! Selamat datang, Admin.`, 'success'), 400);
+  /* ── Wizard complete (Simpan Circle Baru ke Backend Supabase) ── */
+  const handleWizardComplete = useCallback(async (name: string, track: TrackType) => {
+    try {
+      const res = await circleService.createCircle({
+        name,
+        track_type: track,
+        monthly_dues: 1000000,
+      });
+
+      const newCircle: CircleState = res.data?.data ? {
+        id: res.data.data.id || 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
+        name: res.data.data.name || name,
+        trackType: track,
+      } : {
+        id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
+        name,
+        trackType: track,
+      };
+
+      setCircles((p) => [...p, newCircle]);
+      setCircle(newCircle);
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setWizardOpen(false);
+
+      const dest: Screen = track === 'TRACK_A' ? 'dashboard' : 'spin_wheel';
+      setScreenState(dest);
+      window.location.hash = SCREEN_TO_HASH[dest];
+      addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
+    } catch (err: any) {
+      const fallbackCircle: CircleState = {
+        id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
+        name,
+        trackType: track,
+      };
+      setCircles((p) => [...p, fallbackCircle]);
+      setCircle(fallbackCircle);
+      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setWizardOpen(false);
+      const dest: Screen = track === 'TRACK_A' ? 'dashboard' : 'spin_wheel';
+      setScreenState(dest);
+      window.location.hash = SCREEN_TO_HASH[dest];
+      addToast(`Circle "${name}" dibuat dalam mode lokal.`, 'info');
+    }
   }, [addToast]);
 
   /* ── Dashboard nav adapter ── */
@@ -1030,6 +1093,7 @@ export default function App() {
               embedded onBack={toDash}
               trackType={circle.trackType}
               userRole={user.role === 'LEADER' ? 'leader' : 'member'}
+              circleId={circle.id}
               onOpenPayment={() => openPayment(1_000_000, 'Iuran Bulanan Siklus 4')}
             />
           </ErrorBoundary>
@@ -1071,6 +1135,7 @@ export default function App() {
       activeTab, setActiveTab, inviteCode, setInviteCode,
       phone, setPhone, loginLoading,
       onOTPRequest: handleOTPRequest,
+      onJoinCircle: handleJoinCircle,
       onOpenWizard: () => setWizardOpen(true),
     };
 
