@@ -34,14 +34,30 @@ func main() {
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
+	paymentHandler := handlers.NewPaymentHandler(db)
 
 	// Inisialisasi Module Draw & Cycle (Real Database Supabase)
 	drawRepo := repository.NewDrawRepository(db)
 	drawService := service.NewDrawService(drawRepo)
 	drawHandler := handlers.NewDrawHandler(drawService)
 
+	healthHandler := func(c *gin.Context) {
+		dbStatus := "disconnected"
+		if db != nil {
+			if err := db.Ping(c.Request.Context()); err == nil {
+				dbStatus = "connected"
+			}
+		}
+		c.JSON(200, gin.H{
+			"status":   "ok",
+			"database": dbStatus,
+		})
+	}
+	r.GET("/health", healthHandler)
+
 	v1 := r.Group("/api/v1")
 	{
+		v1.GET("/health", healthHandler)
 		// -------------------------------------------------------------
 		// Modul 2.1: Autentikasi & Identitas Pengguna (Track 1)
 		// -------------------------------------------------------------
@@ -107,6 +123,7 @@ func main() {
 
 			// Relasi Siklus per Circle
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
+			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)
 
 			// Legacy spin & bids di circle level
 			circles.POST("/:id/bids", handlers.SubmitBid)
@@ -155,23 +172,23 @@ func main() {
 		obligations := v1.Group("/obligations")
 		obligations.Use(middleware.AuthMiddleware())
 		{
-			obligations.POST("/:id/pay", handlers.PayObligation)
+			obligations.POST("/:id/pay", paymentHandler.PayObligation)
 		}
 
 		payments := v1.Group("/payments")
 		payments.Use(middleware.AuthMiddleware())
 		{
-			payments.GET("/:id", handlers.GetPaymentDetail)
-			payments.POST("/:id/proof", handlers.UploadPaymentProof)
+			payments.GET("/:id", paymentHandler.GetPaymentDetail)
+			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof)
 
 			// Legacy aliases
-			payments.POST("", handlers.SubmitPayment)
-			payments.GET("/group/:id", handlers.GetGroupPayments)
-			payments.PATCH("/:id/verify", handlers.VerifyPayment)
+			payments.POST("", paymentHandler.SubmitPayment)
+			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
+			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)
 		}
 
-		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), handlers.ReviewPaymentProof)
-		v1.POST("/webhooks/payment-gateway", handlers.HandlePaymentGatewayWebhook)
+		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), paymentHandler.ReviewPaymentProof)
+		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook)
 	}
 
 	port := os.Getenv("PORT")

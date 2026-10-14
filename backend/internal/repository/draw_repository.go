@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,11 +18,60 @@ type ParticipantDB struct {
 	Status        string `json:"status"`
 }
 
+type CircleCycleInfo struct {
+	CircleID           string   `json:"circle_id"`
+	CircleName         string   `json:"circle_name"`
+	TrackType          string   `json:"track_type"`
+	ContributionAmount float64  `json:"contribution_amount"`
+	MemberLimit        int      `json:"member_limit"`
+	BidFloorPercent    *float64 `json:"bid_floor_percent"`
+	BidCeilingPercent  *float64 `json:"bid_ceiling_percent"`
+	CycleNumber        int      `json:"cycle_number"`
+	CycleStatus        string   `json:"cycle_status"`
+}
+
+type BidEntry struct {
+	ParticipantID  string  `json:"participant_id"`
+	UserID         string  `json:"user_id"`
+	FullName       string  `json:"full_name"`
+	BidRatePercent float64 `json:"bid_rate_percent"`
+}
+
+type ObligationDB struct {
+	ObligationID  string    `json:"obligation_id"`
+	ParticipantID string    `json:"participant_id"`
+	UserID        string    `json:"user_id"`
+	FullName      string    `json:"full_name"`
+	AmountDue     float64   `json:"amount_due"`
+	DueAt         time.Time `json:"due_at"`
+	Status        string    `json:"status"`
+}
+
+type AwardDB struct {
+	AwardID        string     `json:"award_id"`
+	CycleID        string     `json:"cycle_id"`
+	ParticipantID  string     `json:"participant_id"`
+	WinnerUserID   string     `json:"winner_user_id"`
+	WinnerName     string     `json:"winner_name"`
+	AwardMethod    string     `json:"award_method"`
+	GrossAmount    float64    `json:"gross_amount"`
+	WinningBidRate *float64   `json:"winning_bid_rate_percent,omitempty"`
+	PayableBidRate *float64   `json:"payable_bid_rate_percent,omitempty"`
+	DecisionHash   string     `json:"decision_hash"`
+	DecidedAt      time.Time  `json:"decided_at"`
+}
+
 type DrawRepository interface {
 	GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error)
 	GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error)
+	GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error)
+	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
-	ExecuteDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, awardMethod string, amount float64) (string, error)
+	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
+	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment string) (string, error)
+	GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error)
+	GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error)
+	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 }
 
 type drawRepo struct {
@@ -32,11 +82,10 @@ func NewDrawRepository(db *pgxpool.Pool) DrawRepository {
 	return &drawRepo{db: db}
 }
 
-// 1. Get Participants dengan Pagination (Menggunakan JOIN circle_memberships & users)
+// 1. Get Participants dengan Pagination
 func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error) {
 	offset := (page - 1) * pageSize
 
-	// Count total
 	var total int64
 	countQuery := `SELECT COUNT(*) FROM cycle_participants WHERE cycle_id = $1`
 	err := r.db.QueryRow(ctx, countQuery, cycleID).Scan(&total)
@@ -44,12 +93,11 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 		return nil, 0, fmt.Errorf("failed to count participants: %w", err)
 	}
 
-	// Query paginated dengan DOUBLE JOIN (cycle_participants -> circle_memberships -> users)
 	query := `
-		SELECT 
-			cp.cycle_participant_id, 
-			COALESCE(cm.user_id, '00000000-0000-0000-0000-000000000000'), 
-			COALESCE(u.full_name, 'Anggota'), 
+		SELECT
+			cp.cycle_participant_id,
+			COALESCE(cm.user_id::text, '00000000-0000-0000-0000-000000000000'),
+			COALESCE(u.full_name, 'Anggota'),
 			cp.participation_status
 		FROM cycle_participants cp
 		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
@@ -83,22 +131,28 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	return list, total, nil
 }
 
-// 2. Ambil Partisipan ELIGIBLE yang Belum Menang
+// 2. Ambil Partisipan ELIGIBLE yang Belum Pernah Menang di Circle ini
 func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error) {
 	query := `
-		SELECT 
-			cp.cycle_participant_id, 
-			COALESCE(cm.user_id, '00000000-0000-0000-0000-000000000000'), 
-			COALESCE(u.full_name, 'Anggota'), 
+		SELECT
+			cp.cycle_participant_id,
+			COALESCE(cm.user_id::text, '00000000-0000-0000-0000-000000000000'),
+			COALESCE(u.full_name, 'Anggota'),
 			cp.participation_status
 		FROM cycle_participants cp
-		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
-		LEFT JOIN users u ON cm.user_id = u.user_id
-		WHERE cp.cycle_id = $1 
+		JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
+		JOIN users u ON cm.user_id = u.user_id
+		JOIN arisan_cycles ac ON ac.cycle_id = cp.cycle_id
+		WHERE cp.cycle_id = $1
 		  AND cp.participation_status = 'ELIGIBLE'
 		  AND cm.user_id NOT IN (
-			  SELECT winner_user_id FROM cycle_awards WHERE cycle_id = $1
-		  )
+			  SELECT cm2.user_id
+			  FROM cycle_awards ca
+			  JOIN cycle_participants cp2 ON cp2.cycle_participant_id = ca.cycle_participant_id
+			  JOIN circle_memberships cm2 ON cm2.circle_membership_id = cp2.circle_membership_id
+			  JOIN arisan_cycles ac2 ON ac2.cycle_id = ca.cycle_id
+			  WHERE ac2.circle_id = ac.circle_id
+		  );
 	`
 	rows, err := r.db.Query(ctx, query, cycleID)
 	if err != nil {
@@ -124,59 +178,402 @@ func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) 
 	return list, nil
 }
 
-// 3. Upsert Bid Lelang SPSB (Track A)
-func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error {
+// 3. Ambil Metadata Circle & Cycle
+func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error) {
 	query := `
-		INSERT INTO bids (cycle_id, user_id, bid_rate_percent, created_at)
-		VALUES ($1, $2, $3, NOW())
-		ON CONFLICT (cycle_id, user_id) 
-		DO UPDATE SET bid_rate_percent = EXCLUDED.bid_rate_percent, updated_at = NOW()
+		SELECT
+			c.circle_id::text,
+			c.circle_name,
+			c.track_type,
+			c.contribution_amount,
+			c.member_limit,
+			c.bid_floor_percent,
+			c.bid_ceiling_percent,
+			ac.cycle_number,
+			ac.cycle_status
+		FROM arisan_cycles ac
+		JOIN circles c ON c.circle_id = ac.circle_id
+		WHERE ac.cycle_id = $1;
 	`
-	_, err := r.db.Exec(ctx, query, cycleID, userID, bidRate)
+	var info CircleCycleInfo
+	err := r.db.QueryRow(ctx, query, cycleID).Scan(
+		&info.CircleID,
+		&info.CircleName,
+		&info.TrackType,
+		&info.ContributionAmount,
+		&info.MemberLimit,
+		&info.BidFloorPercent,
+		&info.BidCeilingPercent,
+		&info.CycleNumber,
+		&info.CycleStatus,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("siklus arisan tidak ditemukan")
+		}
+		return nil, fmt.Errorf("failed to get circle info: %w", err)
+	}
+	return &info, nil
+}
+
+// 4. Submit / Upsert Bid Lelang SPSB (Track A)
+func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error {
+	// Temukan cycle_participant_id
+	findParticipantQuery := `
+		SELECT cp.cycle_participant_id
+		FROM cycle_participants cp
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		WHERE cp.cycle_id = $1 AND cm.user_id = $2 AND cp.participation_status = 'ELIGIBLE';
+	`
+	var participantID string
+	err := r.db.QueryRow(ctx, findParticipantQuery, cycleID, userID).Scan(&participantID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("pengguna bukan merupakan partisipan aktif atau belum berhak mengajukan bid pada siklus ini")
+		}
+		return fmt.Errorf("failed to lookup participant: %w", err)
+	}
+
+	// Upsert ke tabel bids (Query 3.5 SSOT)
+	query := `
+		INSERT INTO bids (cycle_participant_id, bid_rate_percent, bid_status, submitted_at)
+		VALUES ($1, $2, 'ACTIVE', NOW())
+		ON CONFLICT (cycle_participant_id)
+		DO UPDATE SET bid_rate_percent = EXCLUDED.bid_rate_percent, submitted_at = NOW();
+	`
+	_, err = r.db.Exec(ctx, query, participantID, bidRate)
 	if err != nil {
 		return fmt.Errorf("failed to save bid: %w", err)
 	}
 	return nil
 }
 
-// 4. TRANSACTION QUERY: Menyimpan Pemenang & Mengunci Status secara Atomis
-func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, awardMethod string, amount float64) (string, error) {
+// 5. Ambil Tawaran Lelang Terurut Tertinggi (Query 3.6 SSOT)
+func (r *drawRepo) GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error) {
+	query := `
+		SELECT
+			cp.cycle_participant_id::text,
+			cm.user_id::text,
+			u.full_name,
+			b.bid_rate_percent
+		FROM bids b
+		JOIN cycle_participants cp ON cp.cycle_participant_id = b.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		JOIN users u ON u.user_id = cm.user_id
+		WHERE cp.cycle_id = $1 AND b.bid_status = 'ACTIVE'
+		ORDER BY b.bid_rate_percent DESC
+		LIMIT 2;
+	`
+	rows, err := r.db.Query(ctx, query, cycleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active bids: %w", err)
+	}
+	defer rows.Close()
+
+	var bids []BidEntry
+	for rows.Next() {
+		var b BidEntry
+		if err := rows.Scan(&b.ParticipantID, &b.UserID, &b.FullName, &b.BidRatePercent); err != nil {
+			return nil, err
+		}
+		bids = append(bids, b)
+	}
+	return bids, nil
+}
+
+// 6. Eksekusi Lelang SPSB Vickrey (Atomis ACID + Auto-Disbursement)
+func (r *drawRepo) ExecuteSPSBDrawTransaction(
+	ctx context.Context,
+	cycleID string,
+	winner BidEntry,
+	winningRate, payableRate, grossAmount, netAmount float64,
+	decisionHash string,
+) (string, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to begin db transaction: %w", err)
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	// A. Insert ke cycle_awards
+	// A. Insert cycle_awards (Query 3.7 SSOT)
 	var awardID string
 	insertAwardQuery := `
-		INSERT INTO cycle_awards (cycle_id, winner_user_id, award_method, gross_amount, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
-		RETURNING cycle_award_id
+		INSERT INTO cycle_awards (
+			cycle_id, cycle_participant_id, award_method, gross_amount,
+			winning_bid_rate_percent, payable_bid_rate_percent, decision_hash, decided_at
+		)
+		VALUES ($1, $2, 'SPSB', $3, $4, $5, $6, NOW())
+		RETURNING award_id::text;
 	`
-	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.UserID, awardMethod, amount).Scan(&awardID)
+	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.ParticipantID, grossAmount, winningRate, payableRate, decisionHash).Scan(&awardID)
 	if err != nil {
 		return "", fmt.Errorf("failed to insert cycle award: %w", err)
 	}
 
-	// B. Update status partisipan menjadi WON di cycle_participants
-	updateParticipantQuery := `
-		UPDATE cycle_participants
-		SET participation_status = 'WON', updated_at = NOW()
-		WHERE cycle_participant_id = $1 AND cycle_id = $2
+	// B. Insert disbursements (Catat pencairan dana otomatis)
+	insertDisbursementQuery := `
+		INSERT INTO disbursements (
+			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
+		)
+		VALUES ($1, 'IN_APP_WALLET', $2, 0.00, $3, 'PAID', NOW(), NOW());
 	`
-	cmdTag, err := tx.Exec(ctx, updateParticipantQuery, winner.ParticipantID, cycleID)
-	if err != nil {
-		return "", fmt.Errorf("failed to update participant status: %w", err)
-	}
-	if cmdTag.RowsAffected() == 0 {
-		return "", errors.New("participant record not found or already updated")
+	if _, err := tx.Exec(ctx, insertDisbursementQuery, awardID, grossAmount, netAmount); err != nil {
+		return "", fmt.Errorf("failed to record disbursement: %w", err)
 	}
 
-	// Commit Transaction
+	// C. Kredit Saldo Dompet Pemenang (Query 3.8 SSOT)
+	updateWalletQuery := `
+		UPDATE user_wallets
+		SET balance = balance + $1, updated_at = NOW()
+		WHERE user_id = $2;
+	`
+	if _, err := tx.Exec(ctx, updateWalletQuery, netAmount, winner.UserID); err != nil {
+		return "", fmt.Errorf("failed to credit winner wallet: %w", err)
+	}
+
+	// D. Catat mutasi ledger di wallet_transactions
+	insertTxQuery := `
+		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description, created_at)
+		SELECT wallet_id, $1, 'DISBURSEMENT', $2, 'Pemenang Arisan Lelang SPSB (Vickrey)', NOW()
+		FROM user_wallets WHERE user_id = $3;
+	`
+	if _, err := tx.Exec(ctx, insertTxQuery, netAmount, awardID, winner.UserID); err != nil {
+		return "", fmt.Errorf("failed to record ledger transaction: %w", err)
+	}
+
+	// E. Perbarui status siklus menjadi COMPLETED
+	updateCycleQuery := `
+		UPDATE arisan_cycles
+		SET cycle_status = 'COMPLETED'
+		WHERE cycle_id = $1;
+	`
+	if _, err := tx.Exec(ctx, updateCycleQuery, cycleID); err != nil {
+		return "", fmt.Errorf("failed to complete cycle: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("failed to commit transaction: %w", err)
+		return "", fmt.Errorf("failed to commit SPSB transaction: %w", err)
 	}
 
 	return awardID, nil
+}
+
+// 7. Eksekusi Kocokan Acak (RANDOM_DRAW) Provably Fair (Atomis ACID + Auto-Disbursement)
+func (r *drawRepo) ExecuteRandomDrawTransaction(
+	ctx context.Context,
+	cycleID string,
+	winner ParticipantDB,
+	grossAmount float64,
+	decisionHash, seedCommitment string,
+) (string, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// A. Insert cycle_awards (Query 3.7 SSOT)
+	var awardID string
+	insertAwardQuery := `
+		INSERT INTO cycle_awards (
+			cycle_id, cycle_participant_id, award_method, gross_amount,
+			decision_hash, decided_at
+		)
+		VALUES ($1, $2, 'RANDOM_DRAW', $3, $4, NOW())
+		RETURNING award_id::text;
+	`
+	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.ParticipantID, grossAmount, decisionHash).Scan(&awardID)
+	if err != nil {
+		return "", fmt.Errorf("failed to insert cycle award: %w", err)
+	}
+
+	// B. Insert draw_results (Provably Fair Audit Trail)
+	insertDrawResultQuery := `
+		INSERT INTO draw_results (
+			award_id, random_seed_commitment, random_source, participant_count, drawn_at
+		)
+		VALUES ($1, $2, 'CRYPTO_SECURE_RANDOM', 1, NOW());
+	`
+	if _, err := tx.Exec(ctx, insertDrawResultQuery, awardID, seedCommitment); err != nil {
+		return "", fmt.Errorf("failed to record draw result audit: %w", err)
+	}
+
+	// C. Insert disbursements
+	insertDisbursementQuery := `
+		INSERT INTO disbursements (
+			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
+		)
+		VALUES ($1, 'IN_APP_WALLET', $2, 0.00, $2, 'PAID', NOW(), NOW());
+	`
+	if _, err := tx.Exec(ctx, insertDisbursementQuery, awardID, grossAmount); err != nil {
+		return "", fmt.Errorf("failed to record disbursement: %w", err)
+	}
+
+	// D. Kredit Saldo Dompet Pemenang (Query 3.8 SSOT)
+	updateWalletQuery := `
+		UPDATE user_wallets
+		SET balance = balance + $1, updated_at = NOW()
+		WHERE user_id = $2;
+	`
+	if _, err := tx.Exec(ctx, updateWalletQuery, grossAmount, winner.UserID); err != nil {
+		return "", fmt.Errorf("failed to credit winner wallet: %w", err)
+	}
+
+	// E. Catat mutasi ledger di wallet_transactions
+	insertTxQuery := `
+		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description, created_at)
+		SELECT wallet_id, $1, 'DISBURSEMENT', $2, 'Pemenang Kocokan Arisan Acak (Random Draw)', NOW()
+		FROM user_wallets WHERE user_id = $3;
+	`
+	if _, err := tx.Exec(ctx, insertTxQuery, grossAmount, awardID, winner.UserID); err != nil {
+		return "", fmt.Errorf("failed to record ledger transaction: %w", err)
+	}
+
+	// F. Perbarui status siklus menjadi COMPLETED
+	updateCycleQuery := `
+		UPDATE arisan_cycles
+		SET cycle_status = 'COMPLETED'
+		WHERE cycle_id = $1;
+	`
+	if _, err := tx.Exec(ctx, updateCycleQuery, cycleID); err != nil {
+		return "", fmt.Errorf("failed to complete cycle: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("failed to commit Random Draw transaction: %w", err)
+	}
+
+	return awardID, nil
+}
+
+// 8. Ambil Tagihan Iuran Siklus dari Database
+func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error) {
+	query := `
+		SELECT
+			co.obligation_id::text,
+			co.cycle_participant_id::text,
+			COALESCE(cm.user_id::text, '00000000-0000-0000-0000-000000000000'),
+			COALESCE(u.full_name, 'Anggota'),
+			co.amount_due,
+			co.due_at,
+			co.obligation_status
+		FROM cycle_obligations co
+		JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		JOIN users u ON u.user_id = cm.user_id
+		WHERE cp.cycle_id = $1
+		ORDER BY co.created_at ASC;
+	`
+	rows, err := r.db.Query(ctx, query, cycleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get obligations: %w", err)
+	}
+	defer rows.Close()
+
+	var list []ObligationDB
+	for rows.Next() {
+		var o ObligationDB
+		if err := rows.Scan(&o.ObligationID, &o.ParticipantID, &o.UserID, &o.FullName, &o.AmountDue, &o.DueAt, &o.Status); err != nil {
+			return nil, err
+		}
+		list = append(list, o)
+	}
+	return list, nil
+}
+
+// 9. Ambil Pemenang Siklus dari Database (cycle_awards)
+func (r *drawRepo) GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error) {
+	query := `
+		SELECT
+			ca.award_id::text,
+			ca.cycle_id::text,
+			ca.cycle_participant_id::text,
+			cm.user_id::text,
+			u.full_name,
+			ca.award_method,
+			ca.gross_amount,
+			ca.winning_bid_rate_percent,
+			ca.payable_bid_rate_percent,
+			ca.decision_hash,
+			ca.decided_at
+		FROM cycle_awards ca
+		JOIN cycle_participants cp ON cp.cycle_participant_id = ca.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		JOIN users u ON u.user_id = cm.user_id
+		WHERE ca.cycle_id = $1;
+	`
+	var a AwardDB
+	err := r.db.QueryRow(ctx, query, cycleID).Scan(
+		&a.AwardID,
+		&a.CycleID,
+		&a.ParticipantID,
+		&a.WinnerUserID,
+		&a.WinnerName,
+		&a.AwardMethod,
+		&a.GrossAmount,
+		&a.WinningBidRate,
+		&a.PayableBidRate,
+		&a.DecisionHash,
+		&a.DecidedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // Belum ada award untuk siklus ini
+		}
+		return nil, fmt.Errorf("failed to get award: %w", err)
+	}
+	return &a, nil
+}
+
+// 10. Buka Siklus Baru, Snapshot Member jadi Peserta, & Terbitkan Tagihan Iuran (Query 3.1, 3.2, 3.3 SSOT)
+func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// A. Buat arisan_cycle baru
+	var cycleID string
+	insertCycleQuery := `
+		INSERT INTO arisan_cycles (circle_id, cycle_number, cycle_status, due_at)
+		VALUES ($1, $2, 'PAYMENT_COLLECTION', $3)
+		RETURNING cycle_id::text;
+	`
+	err = tx.QueryRow(ctx, insertCycleQuery, circleID, cycleNumber, dueAt).Scan(&cycleID)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cycle: %w", err)
+	}
+
+	// B. Snapshot circle members jadi cycle_participants
+	insertParticipantsQuery := `
+		INSERT INTO cycle_participants (cycle_id, circle_membership_id, participation_status)
+		SELECT $1, cm.circle_membership_id, 'ELIGIBLE'
+		FROM circle_memberships cm
+		WHERE cm.circle_id = $2 AND cm.membership_status = 'ACTIVE'
+		ON CONFLICT (cycle_id, circle_membership_id) DO NOTHING;
+	`
+	if _, err := tx.Exec(ctx, insertParticipantsQuery, cycleID, circleID); err != nil {
+		return "", fmt.Errorf("failed to populate cycle participants: %w", err)
+	}
+
+	// C. Auto-generate cycle_obligations
+	insertObligationsQuery := `
+		INSERT INTO cycle_obligations (cycle_participant_id, amount_due, due_at, obligation_status)
+		SELECT cp.cycle_participant_id, c.contribution_amount, $2, 'UNPAID'
+		FROM cycle_participants cp
+		JOIN arisan_cycles ac ON ac.cycle_id = cp.cycle_id
+		JOIN circles c ON c.circle_id = ac.circle_id
+		WHERE cp.cycle_id = $1
+		ON CONFLICT (cycle_participant_id) DO NOTHING;
+	`
+	if _, err := tx.Exec(ctx, insertObligationsQuery, cycleID, dueAt); err != nil {
+		return "", fmt.Errorf("failed to generate cycle obligations: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("failed to commit cycle initialization: %w", err)
+	}
+
+	return cycleID, nil
 }

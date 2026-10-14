@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"backend-arisankita/internal/dto"
 	"backend-arisankita/internal/service"
@@ -22,6 +23,11 @@ type BidInput struct {
 	BidRatePercent float64 `json:"bid_rate_percent" binding:"required"`
 }
 
+type CreateCycleInput struct {
+	CycleNumber int    `json:"cycle_number" binding:"required"`
+	DueAt       string `json:"due_at"`
+}
+
 // GET /api/v1/cycles/:id/participants?page=1&page_size=10
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 	cycleID := c.Param("id")
@@ -38,23 +44,26 @@ func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildPaginatedResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus "+cycleID, participants, meta))
 }
 
-// POST /api/v1/cycles/:id/draw (Track B Spin Wheel)
+// POST /api/v1/cycles/:id/draw (Eksekusi Pemenang: SPSB Vickrey atau Random Draw)
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 	cycleID := c.Param("id")
 
-	result, err := h.drawService.ExecuteRandomDraw(c.Request.Context(), cycleID)
+	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pengundian acak berhasil dieksekusi", result))
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang putaran arisan berhasil ditetapkan dan dana dicairkan", result))
 }
 
 // POST /api/v1/cycles/:id/bids (Track A Lelang SPSB)
 func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	cycleID := c.Param("id")
-	userID := c.GetString("user_id") // Diambil dari JWT Auth Middleware
+	userID := c.GetString("userID")
+	if userID == "" {
+		userID = c.GetString("user_id")
+	}
 
 	var input BidInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -71,6 +80,38 @@ func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 		"cycle_id":         cycleID,
 		"bid_rate_percent": input.BidRatePercent,
 		"bid_status":       "ACTIVE",
+	}))
+}
+
+// POST /api/v1/circles/:id/cycles (Buka siklus baru, snapshot member, & terbitkan tagihan)
+func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
+	circleID := c.Param("id")
+
+	var input CreateCycleInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input siklus tidak valid: "+err.Error(), nil))
+		return
+	}
+
+	dueAt := time.Now().AddDate(0, 1, 0) // Default 30 hari
+	if input.DueAt != "" {
+		if parsed, err := time.Parse(time.RFC3339, input.DueAt); err == nil {
+			dueAt = parsed
+		}
+	}
+
+	cycleID, err := h.drawService.StartNewCycle(c.Request.Context(), circleID, input.CycleNumber, dueAt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menginisialisasi siklus baru: "+err.Error(), nil))
+		return
+	}
+
+	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Siklus baru berhasil dibuka dan tagihan iuran diterbitkan", gin.H{
+		"cycle_id":     cycleID,
+		"circle_id":    circleID,
+		"cycle_number": input.CycleNumber,
+		"cycle_status": "PAYMENT_COLLECTION",
+		"due_at":       dueAt.Format(time.RFC3339),
 	}))
 }
 
@@ -107,24 +148,32 @@ func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 	}))
 }
 
-// GET /api/v1/cycles/:id/obligations
+// GET /api/v1/cycles/:id/obligations (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", []gin.H{
-		{"obligation_id": "ob-01", "participant_id": "par-01", "amount_due": 500000, "status": "PAID"},
-		{"obligation_id": "ob-02", "participant_id": "par-02", "amount_due": 500000, "status": "UNPAID"},
-	}))
+	cycleID := c.Param("id")
+	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil tagihan: "+err.Error(), nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", obligations))
 }
 
-// GET /api/v1/cycles/:id/award
+// GET /api/v1/cycles/:id/award (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 	cycleID := c.Param("id")
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang siklus", gin.H{
-		"award_id":     "awd-" + cycleID,
-		"cycle_id":     cycleID,
-		"winner_name":  "Roy",
-		"award_method": "RANDOM_DRAW",
-		"gross_amount": 5000000,
-	}))
+	award, err := h.drawService.GetCycleAward(c.Request.Context(), cycleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil data pemenang: "+err.Error(), nil))
+		return
+	}
+	if award == nil {
+		c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Belum ada pemenang yang ditetapkan untuk siklus ini", nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Data pemenang putaran arisan", award))
 }
 
 // GET /api/v1/draws/group/:id (Legacy alias)
