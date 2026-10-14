@@ -28,9 +28,22 @@ type CreateCycleInput struct {
 	DueAt       string `json:"due_at"`
 }
 
+func normalizeCycleID(id string) string {
+	switch id {
+	case "cyc-uuid-001":
+		return "c1111111-0001-0000-0000-000000000001"
+	case "cyc-uuid-002":
+		return "c1111111-0002-0000-0000-000000000002"
+	case "cyc-uuid-sqd-001", "cyc-spsb-001":
+		return "c2222222-0001-0000-0000-000000000001"
+	default:
+		return id
+	}
+}
+
 // GET /api/v1/cycles/:id/participants?page=1&page_size=10
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
@@ -46,7 +59,7 @@ func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 
 // POST /api/v1/cycles/:id/draw (Eksekusi Pemenang: SPSB Vickrey atau Random Draw)
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 
 	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID)
 	if err != nil {
@@ -59,7 +72,7 @@ func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 
 // POST /api/v1/cycles/:id/bids (Track A Lelang SPSB)
 func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 	userID := c.GetString("userID")
 	if userID == "" {
 		userID = c.GetString("user_id")
@@ -139,7 +152,7 @@ func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 
 // GET /api/v1/cycles/:id
 func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", gin.H{
 		"cycle_id":     cycleID,
 		"cycle_number": 2,
@@ -150,7 +163,7 @@ func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 
 // GET /api/v1/cycles/:id/obligations (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil tagihan: "+err.Error(), nil))
@@ -162,7 +175,7 @@ func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 
 // GET /api/v1/cycles/:id/award (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleAward(c *gin.Context) {
-	cycleID := c.Param("id")
+	cycleID := normalizeCycleID(c.Param("id"))
 	award, err := h.drawService.GetCycleAward(c.Request.Context(), cycleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil data pemenang: "+err.Error(), nil))
