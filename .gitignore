@@ -1,4 +1,4 @@
-# OS & Editor
+# OS & Editor Files
 .DS_Store
 *.DS_Store
 Thumbs.db
@@ -7,20 +7,28 @@ Thumbs.db
 *.swp
 *.swo
 
-# Go
-backend/main
-backend/*.exe
-backend/*.test
-go.work
-go.work.sum
-
-# Environment
+# Environment Variables & Secrets
 .env
+*.env
+*.env.*
+!.env.example
 backend/.env
 frontend/.env
 *.env.local
 
-# Node & Frontend
+# Go (Backend)
+backend/main
+backend/*.exe
+backend/*.test
+backend/bin/
+
+# Node.js & Vite (Frontend)
 frontend/node_modules/
 frontend/dist/
 frontend/.cache/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Build artifacts & logs
+*.log
