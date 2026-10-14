@@ -28,7 +28,7 @@ func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
 		return
 	}
 
-	query := `SELECT id AS wallet_id, user_id, balance, updated_at FROM user_wallets WHERE user_id = $1;`
+	query := `SELECT wallet_id::text, user_id::text, balance, updated_at FROM user_wallets WHERE user_id = $1;`
 
 	var wallet dto.WalletResponse
 	var updatedAtTime time.Time
@@ -62,9 +62,9 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 	}
 
 	query := `
-		SELECT wt.id, wt.wallet_id, wt.transaction_type, wt.mutation_type, wt.amount, COALESCE(wt.description, '') AS description, wt.created_at
+		SELECT wt.wallet_tx_id::text AS id, wt.wallet_id::text, wt.tx_type AS transaction_type, 'CREDIT' AS mutation_type, wt.amount, COALESCE(wt.description, '') AS description, wt.created_at
 		FROM wallet_transactions wt
-		JOIN user_wallets uw ON wt.wallet_id = uw.id
+		JOIN user_wallets uw ON wt.wallet_id = uw.wallet_id
 		WHERE uw.user_id = $1
 		ORDER BY wt.created_at DESC;
 	`
@@ -128,19 +128,19 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 	upsertQuery := `
 		INSERT INTO user_wallets (user_id, balance, updated_at)
 		VALUES ($2, $1, NOW())
-		ON CONFLICT (user_id) 
+		ON CONFLICT (user_id)
 		DO UPDATE SET balance = user_wallets.balance + $1, updated_at = NOW()
-		RETURNING id, balance;
+		RETURNING wallet_id::text, balance;
 	`
 	err = tx.QueryRow(ctx, upsertQuery, req.Amount, userID).Scan(&walletID, &newBalance)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memperbarui saldo dompet"})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal memperbarui saldo dompet: " + err.Error()})
 		return
 	}
 
 	insertQuery := `
-		INSERT INTO wallet_transactions (wallet_id, transaction_type, mutation_type, amount, description, created_at)
-		VALUES ($1, 'TOPUP', 'CREDIT', $2, 'Top-up saldo sandbox testing', NOW());
+		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, description, created_at)
+		VALUES ($1, $2, 'TOPUP', 'Top-up saldo sandbox testing', NOW());
 	`
 	_, err = tx.Exec(ctx, insertQuery, walletID, req.Amount)
 	if err != nil {

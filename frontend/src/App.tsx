@@ -883,11 +883,15 @@ export default function App() {
       if (resAuth.data?.data?.token) {
         localStorage.setItem('token', resAuth.data.data.token);
       }
+      const uData = resAuth.data?.data?.user;
+      const userName = uData?.full_name || 'Pengguna';
+      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 
-      setUser((u) => ({ ...u, isLoggedIn: true }));
+      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
       setOtpOpen(false);
       setScreenState('dashboard');
       window.location.hash = SCREEN_TO_HASH['dashboard'];
+      addToast(`Masuk sebagai ${userName}`, 'success');
     } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
       setUser((u) => ({ ...u, isLoggedIn: true }));
@@ -905,16 +909,20 @@ export default function App() {
     try {
       setLoading(true);
       const res = await userWalletService.verifyOTP(phone || '8123456789', otpCode || '1234');
-      
+
       if (res.data?.data?.token) {
         localStorage.setItem('token', res.data.data.token);
       }
 
-      setUser((u) => ({ ...u, isLoggedIn: true }));
+      const uData = res.data?.data?.user;
+      const userName = uData?.full_name || 'Pengguna';
+      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+
+      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
       setOtpOpen(false);
       setScreenState('dashboard');
       window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast('Login berhasil! Token JWT tersimpan.', 'success');
+      addToast(`Login berhasil sebagai ${userName}!`, 'success');
     } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
       setUser((u) => ({ ...u, isLoggedIn: true }));
@@ -931,20 +939,26 @@ export default function App() {
     setPhone('8123456789');
     setOtpValues(['1', '2', '3', '4']);
     setLoading(true);
-    
+
     try {
       const res = await userWalletService.verifyOTP('8123456789', '1234');
       if (res.data?.data?.token) {
         localStorage.setItem('token', res.data.data.token);
       }
+      const uData = res.data?.data?.user;
+      const userName = uData?.full_name || 'Farrel Abda';
+      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+
+      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
+      addToast(`Masuk sebagai ${userName} (Ketua)`, 'success');
     } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
+      setUser((u) => ({ ...u, isLoggedIn: true, name: 'Farrel Abda', initials: 'FA' }));
+      addToast('Masuk sebagai Farrel Abda (Ketua)', 'success');
     } finally {
       setLoading(false);
-      setUser((u) => ({ ...u, isLoggedIn: true }));
       setScreenState('dashboard');
       window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast('Masuk sebagai Farrel Abda (Ketua)', 'success');
     }
   }, [addToast]);
 

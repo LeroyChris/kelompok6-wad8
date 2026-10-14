@@ -30,6 +30,7 @@ func main() {
 	r.Use(cors.New(corsConfig))
 
 	// Inisialisasi Layer Repository -> Service -> Handler Instances
+	authHandler := handlers.NewAuthHandler(db)
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
@@ -46,11 +47,13 @@ func main() {
 		// -------------------------------------------------------------
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/otp/request", handlers.RequestOTP)
-			auth.POST("/otp/verify", handlers.VerifyOTP)
-			auth.POST("/google", handlers.GoogleAuth)
-			auth.POST("/register", handlers.Register)
-			auth.POST("/login", handlers.Login)
+			auth.POST("/otp/request", authHandler.RequestOTP)
+			auth.POST("/otp/verify", authHandler.VerifyOTP)
+			auth.POST("/request-otp", authHandler.RequestOTP)
+			auth.POST("/verify-otp", authHandler.VerifyOTP)
+			auth.POST("/google", authHandler.GoogleAuth)
+			auth.POST("/register", authHandler.Register)
+			auth.POST("/login", authHandler.Login)
 		}
 
 		users := v1.Group("/users")

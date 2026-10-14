@@ -29,17 +29,19 @@ func (h *UserHandler) GetUserProfile(c *gin.Context) {
 	}
 
 	query := `
-		SELECT 
-			u.id, u.full_name, u.email, 
-			COALESCE(u.phone_number, '') AS phone_number, 
-			COALESCE(u.avatar_url, '') AS avatar_url, 
+		SELECT
+			u.user_id, u.full_name, COALESCE(u.email, ''),
+			COALESCE(u.phone_number, '') AS phone_number,
+			'' AS avatar_url,
 			u.created_at,
-			COALESCE(COUNT(w.id), 0) AS total_wins,
-			COALESCE(SUM(w.awarded_amount), 0) AS total_win_amount
+			COALESCE(COUNT(ca.award_id), 0) AS total_wins,
+			COALESCE(SUM(ca.gross_amount), 0.00)::NUMERIC(18,2) AS total_win_amount
 		FROM users u
-		LEFT JOIN winner_histories w ON u.id = w.user_id
-		WHERE u.id = $1
-		GROUP BY u.id;
+		LEFT JOIN circle_memberships cm ON cm.user_id = u.user_id
+		LEFT JOIN cycle_participants cp ON cp.circle_membership_id = cm.circle_membership_id
+		LEFT JOIN cycle_awards ca ON ca.cycle_participant_id = cp.cycle_participant_id
+		WHERE u.user_id = $1
+		GROUP BY u.user_id, u.full_name, u.email, u.phone_number, u.created_at;
 	`
 
 	var profile dto.UserProfileResponse
@@ -72,17 +74,20 @@ func (h *UserHandler) GetWinHistory(c *gin.Context) {
 	}
 
 	query := `
-		SELECT 
-			w.id AS winner_id,
-			c.id AS circle_id,
-			c.name AS circle_name,
-			w.round_number,
-			w.awarded_amount,
-			w.won_at
-		FROM winner_histories w
-		JOIN arisan_circles c ON w.circle_id = c.id
-		WHERE w.user_id = $1
-		ORDER BY w.won_at DESC;
+		SELECT
+			ca.award_id::text AS winner_id,
+			c.circle_id::text AS circle_id,
+			c.circle_name AS circle_name,
+			ac.cycle_number AS round_number,
+			ca.gross_amount AS awarded_amount,
+			ca.decided_at AS won_at
+		FROM cycle_awards ca
+		JOIN cycle_participants cp ON cp.cycle_participant_id = ca.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		JOIN circles c ON c.circle_id = cm.circle_id
+		JOIN arisan_cycles ac ON ac.cycle_id = ca.cycle_id
+		WHERE cm.user_id = $1
+		ORDER BY ca.decided_at DESC;
 	`
 
 	rows, err := h.DB.Query(c.Request.Context(), query, userID)
@@ -130,19 +135,18 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 	query := `
 		UPDATE users
-		SET 
+		SET
 			full_name = COALESCE(NULLIF($1, ''), full_name),
 			phone_number = COALESCE(NULLIF($2, ''), phone_number),
-			avatar_url = COALESCE(NULLIF($3, ''), avatar_url),
 			updated_at = NOW()
-		WHERE id = $4
-		RETURNING id, full_name, email, COALESCE(phone_number, ''), COALESCE(avatar_url, ''), created_at;
+		WHERE user_id = $3
+		RETURNING user_id, full_name, COALESCE(email, ''), COALESCE(phone_number, ''), '' AS avatar_url, created_at;
 	`
 
 	var profile dto.UserProfileResponse
 	var createdAtTime time.Time
 
-	err := h.DB.QueryRow(c.Request.Context(), query, req.FullName, req.PhoneNumber, req.AvatarURL, userID).Scan(
+	err := h.DB.QueryRow(c.Request.Context(), query, req.FullName, req.PhoneNumber, userID).Scan(
 		&profile.ID, &profile.FullName, &profile.Email, &profile.PhoneNumber, &profile.AvatarURL, &createdAtTime,
 	)
 
@@ -164,11 +168,13 @@ func (h *UserHandler) GetUserReputation(c *gin.Context) {
 	}
 
 	query := `
-		SELECT 
-			COALESCE(COUNT(CASE WHEN status = 'PAID' THEN 1 END), 0) AS total_paid,
-			COALESCE(COUNT(CASE WHEN status = 'LATE' OR status = 'OVERDUE' THEN 1 END), 0) AS total_late
-		FROM cycle_obligations
-		WHERE user_id = $1;
+		SELECT
+			COALESCE(COUNT(CASE WHEN co.obligation_status = 'PAID' THEN 1 END), 0) AS total_paid,
+			COALESCE(COUNT(CASE WHEN co.obligation_status = 'OVERDUE' THEN 1 END), 0) AS total_late
+		FROM cycle_obligations co
+		JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+		WHERE cm.user_id = $1;
 	`
 
 	var totalPaid, totalLate int
