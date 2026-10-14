@@ -7,56 +7,51 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/joho/godotenv"
 )
 
 var DB *pgxpool.Pool
 
-// InitDB initializes PostgreSQL connection pool using pgxpool (Raw SQL, No ORM)
 func InitDB() *pgxpool.Pool {
-	// Load .env file if exists
-	_ = godotenv.Load()
-
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Println("[WARN] DATABASE_URL is not set. Running without active database connection (mock mode only).")
-		return nil
+		log.Println("[WARN] DATABASE_URL tidak ditemukan di environment. Menggunakan fallback lokal.")
+		dbURL = "postgres://postgres:postgres@localhost:5432/arisankita_db?sslmode=disable"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	config, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		log.Fatalf("[FATAL] Gagal membaca konfigurasi DATABASE_URL: %v", err)
+	}
+
+	// ── Config Pool Settings ──
+	config.MaxConns = 10                      // Maksimal koneksi simultan
+	config.MinConns = 2                       // Minimal koneksi aktif
+	config.MaxConnLifetime = 1 * time.Hour    // Daur ulang koneksi tiap 1 jam
+	config.MaxConnIdleTime = 15 * time.Minute // Tutup koneksi idle > 15 menit
+
+	// Timeout pembuatan koneksi awal
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	poolConfig, err := pgxpool.ParseConfig(dbURL)
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
-		log.Printf("[WARN] Failed to parse DATABASE_URL: %v", err)
-		return nil
+		log.Fatalf("[FATAL] Gagal membuat pool koneksi database: %v", err)
 	}
 
-	// Pool settings
-	poolConfig.MaxConns = 10
-	poolConfig.MinConns = 2
-	poolConfig.MaxConnLifetime = 1 * time.Hour
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		log.Printf("[WARN] Unable to connect to Supabase PostgreSQL: %v", err)
-		return nil
-	}
-
+	// Tes Ping awal untuk memastikan database dapat dijangkau
 	if err := pool.Ping(ctx); err != nil {
-		log.Printf("[WARN] Database ping failed: %v", err)
-		return nil
+		log.Printf("[WARN] Gagal melakukan ping ke database Supabase: %v", err)
+	} else {
+		log.Println("[INFO] Berhasil terhubung ke Database Supabase via pgxpool.")
 	}
 
-	log.Println("[INFO] Successfully connected to Supabase PostgreSQL (pgxpool)!")
 	DB = pool
-	return pool
+	return DB
 }
 
-// CloseDB closes database connection pool
 func CloseDB() {
 	if DB != nil {
 		DB.Close()
-		log.Println("[INFO] Database connection closed.")
+		log.Println("[INFO] Pool koneksi database berhasil ditutup.")
 	}
 }

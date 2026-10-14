@@ -32,7 +32,7 @@ func NewDrawRepository(db *pgxpool.Pool) DrawRepository {
 	return &drawRepo{db: db}
 }
 
-// 1. Get Participants dengan Pagination & SQL Query
+// 1. Get Participants dengan Pagination (Menggunakan JOIN circle_memberships & users)
 func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error) {
 	offset := (page - 1) * pageSize
 
@@ -44,11 +44,16 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 		return nil, 0, fmt.Errorf("failed to count participants: %w", err)
 	}
 
-	// Query paginated
+	// Query paginated dengan DOUBLE JOIN (cycle_participants -> circle_memberships -> users)
 	query := `
-		SELECT cp.id, cp.user_id, COALESCE(u.full_name, 'Anggota'), cp.status
+		SELECT 
+			cp.cycle_participant_id, 
+			COALESCE(cm.user_id, '00000000-0000-0000-0000-000000000000'), 
+			COALESCE(u.full_name, 'Anggota'), 
+			cp.participation_status
 		FROM cycle_participants cp
-		LEFT JOIN users u ON cp.user_id = u.id
+		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
+		LEFT JOIN users u ON cm.user_id = u.user_id
 		WHERE cp.cycle_id = $1
 		ORDER BY cp.created_at ASC
 		LIMIT $2 OFFSET $3
@@ -81,12 +86,17 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 // 2. Ambil Partisipan ELIGIBLE yang Belum Menang
 func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error) {
 	query := `
-		SELECT cp.id, cp.user_id, COALESCE(u.full_name, 'Anggota'), cp.status
+		SELECT 
+			cp.cycle_participant_id, 
+			COALESCE(cm.user_id, '00000000-0000-0000-0000-000000000000'), 
+			COALESCE(u.full_name, 'Anggota'), 
+			cp.participation_status
 		FROM cycle_participants cp
-		LEFT JOIN users u ON cp.user_id = u.id
+		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
+		LEFT JOIN users u ON cm.user_id = u.user_id
 		WHERE cp.cycle_id = $1 
-		  AND cp.status = 'ELIGIBLE'
-		  AND cp.user_id NOT IN (
+		  AND cp.participation_status = 'ELIGIBLE'
+		  AND cm.user_id NOT IN (
 			  SELECT winner_user_id FROM cycle_awards WHERE cycle_id = $1
 		  )
 	`
@@ -129,7 +139,7 @@ func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate 
 	return nil
 }
 
-// 4. TRANSACTION QUERY: Menyimpan Pemenang & Mengunci Status secara Atomis (ACID)
+// 4. TRANSACTION QUERY: Menyimpan Pemenang & Mengunci Status secara Atomis
 func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, awardMethod string, amount float64) (string, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -142,7 +152,7 @@ func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, w
 	insertAwardQuery := `
 		INSERT INTO cycle_awards (cycle_id, winner_user_id, award_method, gross_amount, created_at)
 		VALUES ($1, $2, $3, $4, NOW())
-		RETURNING id
+		RETURNING cycle_award_id
 	`
 	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.UserID, awardMethod, amount).Scan(&awardID)
 	if err != nil {
@@ -152,8 +162,8 @@ func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, w
 	// B. Update status partisipan menjadi WON di cycle_participants
 	updateParticipantQuery := `
 		UPDATE cycle_participants
-		SET status = 'WON', updated_at = NOW()
-		WHERE id = $1 AND cycle_id = $2
+		SET participation_status = 'WON', updated_at = NOW()
+		WHERE cycle_participant_id = $1 AND cycle_id = $2
 	`
 	cmdTag, err := tx.Exec(ctx, updateParticipantQuery, winner.ParticipantID, cycleID)
 	if err != nil {
@@ -163,7 +173,7 @@ func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, w
 		return "", errors.New("participant record not found or already updated")
 	}
 
-	// Commit Transaction jika semua langkah berhasil
+	// Commit Transaction
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
