@@ -37,6 +37,21 @@ type VerifyPaymentInput struct {
 	Status string `json:"status" binding:"required"` // verified, rejected
 }
 
+func normalizeObligationID(id string) string {
+	switch id {
+	case "ob-01":
+		return "0b111111-0001-0000-0000-000000000001"
+	case "ob-02":
+		return "0b111111-0002-0000-0000-000000000002"
+	case "ob-03":
+		return "0b111111-0003-0000-0000-000000000003"
+	case "ob-04":
+		return "0b111111-0004-0000-0000-000000000004"
+	default:
+		return id
+	}
+}
+
 // POST /api/v1/obligations/:id/pay
 func (h *PaymentHandler) PayObligation(c *gin.Context) {
 	userID := c.GetString("userID")
@@ -45,7 +60,7 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 		return
 	}
 
-	obligationID := c.Param("id")
+	obligationID := normalizeObligationID(c.Param("id"))
 	var input SubmitPaymentInput
 	_ = c.ShouldBindJSON(&input)
 
