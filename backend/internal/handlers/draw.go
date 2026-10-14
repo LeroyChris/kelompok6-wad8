@@ -126,3 +126,21 @@ func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 		"gross_amount": 5000000,
 	}))
 }
+
+// GET /api/v1/draws/group/:id (Legacy alias)
+func (h *DrawHandler) GetGroupDraws(c *gin.Context) {
+	groupID := c.Param("id")
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "success",
+		"group_id": groupID,
+		"data": []gin.H{
+			{
+				"draw_id":       "draw-uuid-901",
+				"period_number": 1,
+				"winner_name":   "Roy",
+				"total_won":     5000000,
+				"draw_date":     "2026-08-01T10:00:00Z",
+			},
+		},
+	})
+}
