@@ -27,10 +27,10 @@ func (h *BankAccountHandler) GetBankAccounts(c *gin.Context) {
 	}
 
 	query := `
-		SELECT id, user_id, bank_name, account_number, account_holder, is_primary, created_at
+		SELECT bank_account_id::text, user_id::text, provider AS bank_name, account_number_token AS account_number, account_name_from_provider AS account_holder, true AS is_primary, created_at
 		FROM user_bank_accounts
 		WHERE user_id = $1
-		ORDER BY is_primary DESC, created_at DESC;
+		ORDER BY created_at DESC;
 	`
 
 	rows, err := h.DB.Query(c.Request.Context(), query, userID)
@@ -78,9 +78,12 @@ func (h *BankAccountHandler) AddBankAccount(c *gin.Context) {
 	}
 
 	query := `
-		INSERT INTO user_bank_accounts (user_id, bank_name, account_number, account_holder, is_primary, created_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
-		RETURNING id, created_at;
+		INSERT INTO user_bank_accounts (
+			user_id, provider, account_type, account_number_token,
+			account_number_masked, account_name_from_provider, validation_status, created_at
+		)
+		VALUES ($1, $2, 'BANK', $3, $3, $4, 'MATCHED', NOW())
+		RETURNING bank_account_id::text, created_at;
 	`
 
 	var acc dto.BankAccountItem
@@ -115,7 +118,7 @@ func (h *BankAccountHandler) DeleteBankAccount(c *gin.Context) {
 
 	accountID := c.Param("id")
 
-	query := `DELETE FROM user_bank_accounts WHERE id = $1 AND user_id = $2;`
+	query := `DELETE FROM user_bank_accounts WHERE bank_account_id = $1 AND user_id = $2;`
 	res, err := h.DB.Exec(c.Request.Context(), query, accountID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "message": "Gagal menghapus rekening bank"})
