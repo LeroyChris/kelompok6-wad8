@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Disc, FileCheck2, Trophy, Users, History,
-  CheckCircle2, Clock, Gavel, Lock, ArrowLeft, ShieldAlert,
-  Sparkles, Phone, RefreshCw,
+  Disc, Users, CheckCircle2, Clock, Gavel, ArrowLeft, ShieldAlert, RefreshCw,
 } from 'lucide-react';
 import { circleAuctionService } from '../services/circleAuctionService';
 
@@ -17,12 +15,6 @@ interface MemberCandidate {
   color:          string;
   participant_id: string;
 }
-
-const PAST_WINNERS = [
-  { cycle: 1, name: 'Siti Rahma',   initials: 'SR', color: '#10B981', amount: 'Rp 10.000.000' },
-  { cycle: 2, name: 'Eko Prasetyo', initials: 'EP', color: '#3B82F6', amount: 'Rp 10.000.000' },
-  { cycle: 3, name: 'Rina Wijaya',  initials: 'RW', color: '#8B5CF6', amount: 'Rp 10.000.000' },
-];
 
 const COLORS = ['#F43F5E', '#F97316', '#F59E0B', '#10B981', '#06B6D4', '#8B5CF6', '#3B82F6', '#EC4899'];
 
@@ -100,16 +92,14 @@ export default function SpinWheel({
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 1. Fetch Partisipan Real dari API Backend Go
   useEffect(() => {
     let isMounted = true;
     const fetchParticipants = async () => {
       try {
         setLoading(true);
-        // Memanggil GET /api/v1/cycles/cyc-uuid-002/participants
         const res = await circleAuctionService.getParticipants('cyc-uuid-002');
         if (res.data?.data && isMounted) {
-          const list: MemberCandidate[] = res.data.data.map((item: any, idx: number) => ({
+          const list: MemberCandidate[] = res.data.data.map((item: { name?: string; initials?: string; participant_id?: string }, idx: number) => ({
             name: (item.name || 'User').split(' ')[0],
             fullName: item.name || 'User',
             initials: item.initials || 'US',
@@ -118,8 +108,8 @@ export default function SpinWheel({
           }));
           setMembers(list);
         }
-      } catch (err) {
-        console.warn('Gagal memuat kandidat dari backend Go, menggunakan fallback.');
+      } catch {
+        console.warn('Gagal memuat kandidat dari backend Go.');
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -134,13 +124,11 @@ export default function SpinWheel({
   const isDuesLocked = duesPct < 100;
   const canSpin      = userRole === 'leader' && !isDuesLocked && wheelState === 'idle' && !loading && members.length > 0;
 
-  // 2. Putar Roda Berdasarkan Pemenang Real dari API Backend Go
   const handleSpin = useCallback(async () => {
     if (!canSpin) return;
 
     try {
       setWheelState('spinning');
-      // Memanggil POST /api/v1/cycles/cyc-uuid-002/draw
       const res = await circleAuctionService.executeDraw('cyc-uuid-002');
       
       let targetWinnerIdx = 0;
@@ -152,7 +140,6 @@ export default function SpinWheel({
         if (found !== -1) targetWinnerIdx = found;
       }
 
-      // Rumus Rotasi Presisi: 5 putaran penuh (1800°) + landing offset ke tengah-tengah slice pemenang
       const currentVisual = ((rotation % 360) + 360) % 360;
       const targetDeg     = (360 - (targetWinnerIdx * SLICE_DEG + SLICE_DEG / 2) + 360) % 360;
       const delta         = (targetDeg - currentVisual + 360) % 360 || 360;
@@ -164,7 +151,7 @@ export default function SpinWheel({
       timerRef.current = setTimeout(() => {
         setWheelState('done');
       }, SPIN_MS + 300);
-    } catch (err) {
+    } catch {
       alert('Gagal mengeksekusi pengundian acak di server Go.');
       setWheelState('idle');
     }
@@ -199,7 +186,6 @@ export default function SpinWheel({
       {trackType === 'A' ? <TrackAGuard onNavigateToAuction={onNavigateToAuction} /> : (
         <main className="flex-1 overflow-y-auto p-4 md:p-6 xl:p-8 pb-24 flex flex-col gap-6">
 
-          {/* Hero Summary Card */}
           <div className="bg-[#0A2578] rounded-2xl p-6 md:p-8 shadow-xl shadow-[#0A2578]/20">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
               <div className="flex flex-col gap-3">
@@ -237,7 +223,6 @@ export default function SpinWheel({
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-            {/* RODA PENGOCKAN BOARD */}
             <div className="xl:col-span-7">
               <div className="bg-white rounded-2xl border border-slate-200/80 shadow-md p-6 flex flex-col items-center gap-5">
                 <div className="w-full flex items-center justify-between">
@@ -323,7 +308,6 @@ export default function SpinWheel({
               </div>
             </div>
 
-            {/* DAFTAR ANGGOTA ELIGIBEL */}
             <div className="xl:col-span-5 flex flex-col gap-5">
               <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -352,7 +336,6 @@ export default function SpinWheel({
         </main>
       )}
 
-      {/* WINNER CELEBRATION MODAL */}
       {wheelState === 'done' && winner && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden p-6 text-center flex flex-col items-center gap-4">

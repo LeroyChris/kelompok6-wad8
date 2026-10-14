@@ -143,7 +143,7 @@ func main() {
 		draws := v1.Group("/draws")
 		draws.Use(middleware.AuthMiddleware())
 		{
-			draws.GET("/group/:id", handlers.GetGroupDraws)
+			draws.GET("/group/:id", drawHandler.GetGroupDraws)
 		}
 
 		// -------------------------------------------------------------

@@ -325,7 +325,7 @@ interface AuthCardProps {
 
 function AuthCard({
   activeTab, setActiveTab, inviteCode, setInviteCode,
-  phone, setPhone, loginLoading, onOTPRequest, onJoinCircle, onOpenWizard,
+  phone, setPhone, loginLoading, onOTPRequest, onOpenWizard,
 }: AuthCardProps) {
   return (
     <div className="bg-white text-slate-900 rounded-3xl shadow-2xl border border-slate-100 p-6 md:p-8 flex flex-col gap-6">
@@ -344,7 +344,7 @@ function AuthCard({
       </div>
 
       {activeTab === 'invite' ? (
-        <form onSubmit={onJoinCircle} className="flex flex-col gap-5">
+        <form onSubmit={onOTPRequest} className="flex flex-col gap-5">
           <div className="flex flex-col gap-2">
             <label className="text-sm font-bold text-[#0A2578]">Kode Undangan Circle</label>
             <input
@@ -860,7 +860,7 @@ export default function App() {
       await userWalletService.requestOTP(phone);
       addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 1234)', 'info');
       setOtpOpen(true);
-    } catch (err) {
+    } catch {
       setOtpOpen(true);
     } finally {
       setLoading(false);
@@ -888,7 +888,7 @@ export default function App() {
       setOtpOpen(false);
       setScreenState('dashboard');
       window.location.hash = SCREEN_TO_HASH['dashboard'];
-    } catch (err: any) {
+    } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
       setUser((u) => ({ ...u, isLoggedIn: true }));
       setOtpOpen(false);
@@ -915,7 +915,7 @@ export default function App() {
       setScreenState('dashboard');
       window.location.hash = SCREEN_TO_HASH['dashboard'];
       addToast('Login berhasil! Token JWT tersimpan.', 'success');
-    } catch (err) {
+    } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
       setUser((u) => ({ ...u, isLoggedIn: true }));
       setOtpOpen(false);
@@ -937,7 +937,7 @@ export default function App() {
       if (res.data?.data?.token) {
         localStorage.setItem('token', res.data.data.token);
       }
-    } catch (err) {
+    } catch {
       localStorage.setItem('token', 'demo-mock-jwt-token');
     } finally {
       setLoading(false);
@@ -1013,7 +1013,7 @@ export default function App() {
       setScreenState(dest);
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
-    } catch (err: any) {
+    } catch {
       const fallbackCircle: CircleState = {
         id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
         name,

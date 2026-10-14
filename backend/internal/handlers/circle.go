@@ -9,14 +9,14 @@ import (
 )
 
 type CreateCircleInput struct {
-	CircleName          string   `json:"circle_name" binding:"required"`
-	TrackType           string   `json:"track_type" binding:"required"` // SPSB, RANDOM_DRAW
-	ContributionAmount  float64  `json:"contribution_amount" binding:"required"`
-	MemberLimit         int      `json:"member_limit" binding:"required"`
-	PeriodType          string   `json:"period_type" binding:"required"` // WEEKLY, MONTHLY
-	BidFloorPercent     *float64 `json:"bid_floor_percent,omitempty"`
-	BidCeilingPercent   *float64 `json:"bid_ceiling_percent,omitempty"`
-	StartsAt            *string  `json:"starts_at,omitempty"`
+	CircleName         string   `json:"circle_name" binding:"required"`
+	TrackType          string   `json:"track_type" binding:"required"` // SPSB, RANDOM_DRAW
+	ContributionAmount float64  `json:"contribution_amount" binding:"required"`
+	MemberLimit        int      `json:"member_limit" binding:"required"`
+	PeriodType         string   `json:"period_type" binding:"required"` // WEEKLY, MONTHLY
+	BidFloorPercent    *float64 `json:"bid_floor_percent,omitempty"`
+	BidCeilingPercent  *float64 `json:"bid_ceiling_percent,omitempty"`
+	StartsAt           *string  `json:"starts_at,omitempty"`
 	// Frontend legacy aliases
 	Name            string  `json:"name"`
 	AmountPerPeriod float64 `json:"amount_per_period"`
@@ -54,19 +54,19 @@ func CreateCircle(c *gin.Context) {
 	}
 
 	responseData := gin.H{
-		"circle_id":            "c-uuid-101",
-		"id":                   "c-uuid-101", // frontend legacy alias
-		"circle_name":          name,
-		"name":                 name,
-		"track_type":           trackType,
-		"contribution_amount":  amount,
-		"amount_per_period":    amount,
-		"member_limit":         members,
-		"max_members":          members,
-		"period_type":          periodType,
-		"circle_status":        "RECRUITING",
-		"status":               "active",
-		"created_by_user_id":   "usr-uuid-001",
+		"circle_id":           "c-uuid-101",
+		"id":                  "c-uuid-101", // frontend legacy alias
+		"circle_name":         name,
+		"name":                name,
+		"track_type":          trackType,
+		"contribution_amount": amount,
+		"amount_per_period":   amount,
+		"member_limit":        members,
+		"max_members":         members,
+		"period_type":         periodType,
+		"circle_status":       "RECRUITING",
+		"status":              "active",
+		"created_by_user_id":  "usr-uuid-001",
 	}
 
 	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Circle arisan berhasil dibuat", responseData))
@@ -163,8 +163,8 @@ func JoinCircle(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil bergabung ke circle", gin.H{
-		"circle_id":             "aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-		"circle_name":           "Arisan Keluarga RT 05",
+		"circle_id":            "aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		"circle_name":          "Arisan Keluarga RT 05",
 		"circle_membership_id": "mem-new-099",
 		"membership_status":    "ACTIVE",
 		"membership_role":      "MEMBER",
@@ -180,13 +180,18 @@ func GetCircleMembers(c *gin.Context) {
 	}))
 }
 
-// POST /api/v1/circles/:id/bids (Legacy route)
+// POST /api/v1/circles/:id/bids (Legacy alias di level circle)
 func SubmitBid(c *gin.Context) {
-	SubmitCycleBid(c)
+	c.JSON(200, gin.H{
+		"status":  "success",
+		"message": "Silakan gunakan endpoint resmi /api/v1/cycles/:id/bids",
+	})
 }
 
-// POST /api/v1/circles/:id/spin (Legacy route)
+// POST /api/v1/circles/:id/spin (Legacy alias di level circle)
 func SpinWheel(c *gin.Context) {
-	ExecuteCycleDraw(c)
+	c.JSON(200, gin.H{
+		"status":  "success",
+		"message": "Silakan gunakan endpoint resmi /api/v1/cycles/:id/draw",
+	})
 }
-

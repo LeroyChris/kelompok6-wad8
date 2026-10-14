@@ -1,10 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import {
-  Shield, ChevronDown, Table2, Gavel, Disc,
-  X, CheckCircle2, Clock, AlertCircle, AlertTriangle, Search,
-  Download, ArrowLeft, CreditCard, RefreshCw, Check,
-  MessageCircle, Hash, ExternalLink, ChevronLeft, ChevronRight,
-} from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { circleService } from '../services/circleService';
 
 type TrackType = 'TRACK_A' | 'TRACK_B';
@@ -26,31 +21,24 @@ interface Member {
 const fmtRp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
 
 export default function PaymentMatrix({
-  onBack,
-  trackType     = 'TRACK_A',
-  userRole      = 'leader',
-  circleId      = 'ARK-8891',
-  embedded,
-  onOpenPayment,
+  circleId = 'ARK-8891',
 }: {
-  onBack:          () => void;
-  trackType?:      TrackType;
-  userRole?:       'leader' | 'member';
-  circleId?:       string;
-  embedded?:       boolean;
-  onOpenPayment?:  () => void;
+  onBack?:         () => void;
+  trackType?:     TrackType;
+  userRole?:      'leader' | 'member';
+  circleId?:      string;
+  embedded?:      boolean;
+  onOpenPayment?: () => void;
 }) {
   const [members, setMembers]         = useState<Member[]>([]);
   const [loading, setLoading]         = useState<boolean>(true);
   const [filter, setFilter]           = useState<FilterKey>('all');
   const [search, setSearch]           = useState<string>('');
-  const [receiptMember, setReceiptMember] = useState<Member | null>(null);
 
   /* ── State Pagination ── */
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 5;
 
-  // Fetch Payment Matrix Real-time dari Backend Go
   useEffect(() => {
     let isMounted = true;
     const fetchMatrix = async () => {
@@ -60,7 +48,7 @@ export default function PaymentMatrix({
         if (res.data?.data && isMounted) {
           setMembers(res.data.data);
         }
-      } catch (err) {
+      } catch {
         console.warn('Gagal memuat Payment Matrix dari backend.');
       } finally {
         if (isMounted) setLoading(false);
@@ -70,14 +58,9 @@ export default function PaymentMatrix({
     return () => { isMounted = false; };
   }, [circleId]);
 
-  // Reset halaman saat filter / pencarian berubah
   useEffect(() => {
     setCurrentPage(1);
   }, [filter, search]);
-
-  const lunasCount   = members.filter((m) => m.status === 'lunas').length;
-  const pendingCount = members.filter((m) => m.status === 'pending').length;
-  const overdueCount = members.filter((m) => m.status === 'belum_bayar').length;
 
   const filtered = useMemo(() => members.filter((m) => {
     const matchFilter = filter === 'all' || m.status === filter;
@@ -85,7 +68,6 @@ export default function PaymentMatrix({
     return matchFilter && matchSearch;
   }), [filter, search, members]);
 
-  /* ── Logika Pagination ── */
   const totalPages = Math.ceil(filtered.length / pageSize) || 1;
   const paginatedMembers = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
@@ -101,7 +83,6 @@ export default function PaymentMatrix({
             <p className="text-xs text-slate-400 mt-0.5">Circle: {circleId} · {members.length} anggota total</p>
           </div>
           
-          {/* Search Box */}
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
@@ -114,7 +95,6 @@ export default function PaymentMatrix({
           </div>
         </div>
 
-        {/* Filter Pills */}
         <div className="flex gap-1.5 flex-wrap">
           {(['all', 'lunas', 'pending', 'belum_bayar'] as FilterKey[]).map((f) => (
             <button
@@ -126,12 +106,11 @@ export default function PaymentMatrix({
                   : 'bg-white text-slate-500 border-slate-200 hover:border-[#0A2578]/30'
               }`}
             >
-              {f === 'all' ? `Semua (${members.length})` : `${f.toUpperCase()}`}
+              {f === 'all' ? `Semua (${members.length})` : f.toUpperCase()}
             </button>
           ))}
         </div>
 
-        {/* Table */}
         {loading ? (
           <div className="flex items-center justify-center p-12 text-slate-400 font-bold animate-pulse">
             <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Memuat Data Matriks Pembayaran...
@@ -176,7 +155,6 @@ export default function PaymentMatrix({
               </table>
             </div>
 
-            {/* Controls Pagination */}
             <div className="flex items-center justify-between border-t border-slate-100 pt-4 px-2">
               <span className="text-xs text-slate-500 font-medium">
                 Menampilkan <span className="font-bold text-[#0A2578]">{paginatedMembers.length}</span> dari <span className="font-bold text-[#0A2578]">{filtered.length}</span> anggota
