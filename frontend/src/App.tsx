@@ -18,12 +18,36 @@ import { userWalletService } from './services/userWalletService';
 import { circleService }     from './services/circleService';
 
 /* ══════════════════════════════════════════════════════════
-   TYPES
+   HELPER UTILS: NORMALISASI NOMOR TELEPON
+══════════════════════════════════════════════════════════ */
+const normalizePhoneForApi = (rawPhone: string): string => {
+  let cleaned = rawPhone.replace(/\D/g, '');
+  if (cleaned.startsWith('0')) {
+    cleaned = '62' + cleaned.substring(1);
+  } else if (!cleaned.startsWith('62')) {
+    cleaned = '62' + cleaned;
+  }
+  return cleaned;
+};
+
+const formatPhoneNumberDisplay = (rawPhone: string): string => {
+  let cleaned = rawPhone.replace(/\D/g, '');
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
+  } else if (cleaned.startsWith('62')) {
+    cleaned = cleaned.substring(2);
+  }
+  return `+62 ${cleaned}`;
+};
+
+/* ══════════════════════════════════════════════════════════
+   TYPES (SINKRON DB SUPABASE)
 ══════════════════════════════════════════════════════════ */
 type Screen    = 'landing' | 'dashboard' | 'spsb_auction' | 'spin_wheel' | 'crowdfunding' | 'audit_trail' | 'payment_matrix';
-type TrackType = 'TRACK_A' | 'TRACK_B';
+type TrackType = 'SPSB' | 'RANDOM_DRAW';
+type RoleType  = 'OWNER' | 'MEMBER';
 
-interface UserState   { isLoggedIn: boolean; role: 'LEADER' | 'MEMBER'; name: string; initials: string; reputation: number; }
+interface UserState   { isLoggedIn: boolean; role: RoleType; name: string; initials: string; reputation: number; }
 interface CircleState { id: string; name: string; trackType: TrackType; }
 interface Toast       { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error'; }
 interface PaymentCtx  { amount: number; purpose: string; }
@@ -51,16 +75,10 @@ const SCREEN_TO_HASH: Record<Screen, string> = {
   audit_trail:    '#/audit-trail',
 };
 
-/* ══════════════════════════════════════════════════════════
-   APP DATA
-══════════════════════════════════════════════════════════ */
 const INITIAL_CIRCLES: CircleState[] = [
-  { id: 'ARK-8891', name: 'Arisan Alumni 2018',    trackType: 'TRACK_A' },
-  { id: 'ARK-5024', name: 'Arisan Keluarga Besar', trackType: 'TRACK_B' },
+  { id: 'ARK-8891', name: 'Arisan Alumni 2018',    trackType: 'SPSB' },
+  { id: 'ARK-5024', name: 'Arisan Keluarga Besar', trackType: 'RANDOM_DRAW' },
 ];
-const INITIAL_USER: UserState = {
-  isLoggedIn: false, role: 'LEADER', name: 'Farrel Abda', initials: 'FA', reputation: 98,
-};
 
 const CATEGORIES = ['UMKM & Bisnis', 'Keluarga & Hobi', 'Komunitas / Alumni', 'Kantor'] as const;
 
@@ -119,9 +137,9 @@ const buildNavItems = (trackType: TrackType): NavItem[] => [
   { id: 'matrix',     icon: <Table2 className="w-4 h-4" />,          label: 'Matriks Pembayaran',  targetScreen: 'payment_matrix', activeOn: ['payment_matrix'] },
   {
     id: 'auction',
-    icon:         trackType === 'TRACK_A' ? <Gavel className="w-4 h-4" /> : <Disc className="w-4 h-4" />,
-    label:        trackType === 'TRACK_A' ? 'Room Lelang SPSB' : 'Roda Pengocokan',
-    targetScreen: trackType === 'TRACK_A' ? 'spsb_auction' : 'spin_wheel',
+    icon:         trackType === 'SPSB' ? <Gavel className="w-4 h-4" /> : <Disc className="w-4 h-4" />,
+    label:        trackType === 'SPSB' ? 'Room Lelang SPSB' : 'Roda Pengocokan',
+    targetScreen: trackType === 'SPSB' ? 'spsb_auction' : 'spin_wheel',
     activeOn:     ['spsb_auction', 'spin_wheel'],
   },
   { id: 'crowdfunding', icon: <HandCoins className="w-4 h-4" />,  label: 'Patungan Internal',   targetScreen: 'crowdfunding', activeOn: ['crowdfunding'] },
@@ -204,8 +222,8 @@ function SidebarContent({
           <div className="min-w-0 text-left">
             <p className="text-[10px] text-white/50 font-semibold uppercase tracking-wider mb-0.5">Circle Aktif</p>
             <p className="text-sm font-bold text-white truncate">{circle.name}</p>
-            <p className={`text-[10px] font-semibold mt-0.5 ${circle.trackType === 'TRACK_A' ? 'text-[#5A83DB]' : 'text-emerald-400'}`}>
-              {circle.trackType === 'TRACK_A' ? 'Track A · SPSB' : 'Track B · Sosial'}
+            <p className={`text-[10px] font-semibold mt-0.5 ${circle.trackType === 'SPSB' ? 'text-[#5A83DB]' : 'text-emerald-400'}`}>
+              {circle.trackType === 'SPSB' ? 'Track A · SPSB' : 'Track B · Sosial'}
             </p>
           </div>
           <ChevronDown className={`w-4 h-4 text-white/40 shrink-0 ml-2 transition-transform duration-200 ${circleDropOpen ? 'rotate-180' : ''}`} />
@@ -220,8 +238,8 @@ function SidebarContent({
               >
                 <div>
                   <p className="text-sm font-bold text-white leading-none">{c.name}</p>
-                  <p className={`text-[10px] font-semibold mt-1 ${c.trackType === 'TRACK_A' ? 'text-[#5A83DB]' : 'text-emerald-400'}`}>
-                    {c.id} · {c.trackType === 'TRACK_A' ? 'Track A' : 'Track B'}
+                  <p className={`text-[10px] font-semibold mt-1 ${c.trackType === 'SPSB' ? 'text-[#5A83DB]' : 'text-emerald-400'}`}>
+                    {c.id} · {c.trackType === 'SPSB' ? 'Track A' : 'Track B'}
                   </p>
                 </div>
                 {c.id === circle.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-2" />}
@@ -235,9 +253,9 @@ function SidebarContent({
         <p className="text-[10px] text-white/40 font-semibold uppercase tracking-wider mb-2">Demo Mode</p>
         <div className="flex gap-1.5">
           <button
-            onClick={() => { onDemoSwitch('TRACK_A'); onClose?.(); }}
+            onClick={() => { onDemoSwitch('SPSB'); onClose?.(); }}
             className={`flex-1 flex flex-col items-center gap-1 py-2 text-[10px] font-black rounded-lg transition-all ${
-              circle.trackType === 'TRACK_A'
+              circle.trackType === 'SPSB'
                 ? 'bg-[#5A83DB] text-white shadow-md'
                 : 'bg-white/10 text-white/50 hover:bg-white/15 hover:text-white'
             }`}
@@ -246,9 +264,9 @@ function SidebarContent({
             Track A
           </button>
           <button
-            onClick={() => { onDemoSwitch('TRACK_B'); onClose?.(); }}
+            onClick={() => { onDemoSwitch('RANDOM_DRAW'); onClose?.(); }}
             className={`flex-1 flex flex-col items-center gap-1 py-2 text-[10px] font-black rounded-lg transition-all ${
-              circle.trackType === 'TRACK_B'
+              circle.trackType === 'RANDOM_DRAW'
                 ? 'bg-emerald-500 text-white shadow-md'
                 : 'bg-white/10 text-white/50 hover:bg-white/15 hover:text-white'
             }`}
@@ -319,7 +337,6 @@ interface AuthCardProps {
   setPhone:     (v: string) => void;
   loginLoading: boolean;
   onOTPRequest: (e: React.FormEvent) => void;
-  onJoinCircle: (e: React.FormEvent) => void;
   onOpenWizard: () => void;
 }
 
@@ -363,8 +380,14 @@ function AuthCard({
               <input
                 type="tel" inputMode="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="8123456789"
+                onChange={(e) => {
+                  // Otomatis hilangkan '0' atau '62' jika pengguna tidak sengaja mengetiknya
+                  let val = e.target.value.replace(/\D/g, '');
+                  if (val.startsWith('0')) val = val.substring(1);
+                  if (val.startsWith('62')) val = val.substring(2);
+                  setPhone(val);
+                }}
+                placeholder="81234567890"
                 className="w-full px-4 py-3 text-sm font-medium focus:outline-none bg-transparent placeholder:text-slate-400"
                 required
               />
@@ -427,11 +450,11 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
   const [step,      setStep]      = useState(1);
   const [wName,     setWName]     = useState('');
   const [wCategory, setWCategory] = useState<string>(CATEGORIES[0]);
-  const [wTrack,    setWTrack]    = useState<TrackType>('TRACK_A');
+  const [wTrack,    setWTrack]    = useState<TrackType>('SPSB');
   const [wDues,     setWDues]     = useState('');
   const [wMembers,  setWMembers]  = useState('');
   const [wPhone,    setWPhone]    = useState('');
-  const [wOtp,      setWOtp]      = useState(['1', '2', '3', '4']);
+  const [wOtp,      setWOtp]      = useState(['', '', '', '', '', '']);
   const [wLoading,  setWLoading]  = useState(false);
   const [wComplete, setWComplete] = useState(false);
 
@@ -439,8 +462,8 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
     if (!isOpen) {
       const t = setTimeout(() => {
         setStep(1); setWName(''); setWCategory(CATEGORIES[0]);
-        setWTrack('TRACK_A'); setWDues(''); setWMembers('');
-        setWPhone(''); setWOtp(['1', '2', '3', '4']);
+        setWTrack('SPSB'); setWDues(''); setWMembers('');
+        setWPhone(''); setWOtp(['', '', '', '', '', '']);
         setWLoading(false); setWComplete(false);
       }, 300);
       return () => clearTimeout(t);
@@ -448,9 +471,9 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
   }, [isOpen]);
 
   const handleWOtpInput = (i: number, v: string) => {
-    if (!/^\d*$/.test(v)) return;
-    setWOtp((prev) => { const n = [...prev]; n[i] = v.slice(-1); return n; });
-    if (v && i < 3) document.getElementById(`wotp-${i + 1}`)?.focus();
+    const char = v.replace(/\D/g, '').slice(-1);
+    setWOtp((prev) => { const n = [...prev]; n[i] = char; return n; });
+    if (char && i < 5) document.getElementById(`wotp-${i + 1}`)?.focus();
   };
 
   const handleWOtpKeyDown = (i: number, e: React.KeyboardEvent) => {
@@ -464,7 +487,7 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
   };
 
   const handleVerify = () => {
-    if (wOtp.join('').length < 4) return;
+    if (wOtp.join('').length < 6) return;
     setWLoading(true);
     setTimeout(() => {
       setWLoading(false);
@@ -560,43 +583,43 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
                 </div>
                 <div className="flex flex-col gap-3">
                   <button
-                    onClick={() => setWTrack('TRACK_A')}
+                    onClick={() => setWTrack('SPSB')}
                     className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
-                      wTrack === 'TRACK_A' ? 'border-[#5A83DB] bg-[#5A83DB]/5' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                      wTrack === 'SPSB' ? 'border-[#5A83DB] bg-[#5A83DB]/5' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${wTrack === 'TRACK_A' ? 'bg-[#5A83DB]' : 'bg-slate-200'}`}>
-                        <Gavel className={`w-5 h-5 ${wTrack === 'TRACK_A' ? 'text-white' : 'text-slate-500'}`} />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${wTrack === 'SPSB' ? 'bg-[#5A83DB]' : 'bg-slate-200'}`}>
+                        <Gavel className={`w-5 h-5 ${wTrack === 'SPSB' ? 'text-white' : 'text-slate-500'}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <span className={`text-sm font-black ${wTrack === 'TRACK_A' ? 'text-[#0A2578]' : 'text-slate-700'}`}>Track A — Lelang SPSB</span>
+                          <span className={`text-sm font-black ${wTrack === 'SPSB' ? 'text-[#0A2578]' : 'text-slate-700'}`}>Track A — Lelang SPSB</span>
                           <span className="text-[9px] font-black text-[#5A83DB] bg-[#5A83DB]/10 px-2 py-0.5 rounded-full border border-[#5A83DB]/20 uppercase tracking-wider">Komersial</span>
                         </div>
                         <p className="text-xs text-slate-500 leading-relaxed">Sistem lelang bunga rahasia. Cocok untuk tambahan modal usaha UMKM & bisnis.</p>
                       </div>
-                      {wTrack === 'TRACK_A' && <Check className="w-5 h-5 text-[#5A83DB] shrink-0 mt-0.5" />}
+                      {wTrack === 'SPSB' && <Check className="w-5 h-5 text-[#5A83DB] shrink-0 mt-0.5" />}
                     </div>
                   </button>
                   <button
-                    onClick={() => setWTrack('TRACK_B')}
+                    onClick={() => setWTrack('RANDOM_DRAW')}
                     className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
-                      wTrack === 'TRACK_B' ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                      wTrack === 'RANDOM_DRAW' ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${wTrack === 'TRACK_B' ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                        <Disc className={`w-5 h-5 ${wTrack === 'TRACK_B' ? 'text-white' : 'text-slate-500'}`} />
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${wTrack === 'RANDOM_DRAW' ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                        <Disc className={`w-5 h-5 ${wTrack === 'RANDOM_DRAW' ? 'text-white' : 'text-slate-500'}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <span className={`text-sm font-black ${wTrack === 'TRACK_B' ? 'text-emerald-800' : 'text-slate-700'}`}>Track B — Roda Pengocokan</span>
+                          <span className={`text-sm font-black ${wTrack === 'RANDOM_DRAW' ? 'text-emerald-800' : 'text-slate-700'}`}>Track B — Roda Pengocokan</span>
                           <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">Sosial</span>
                         </div>
                         <p className="text-xs text-slate-500 leading-relaxed">Sistem pengocokan acak transparan tanpa bunga. Cocok untuk arisan keluarga & hobi.</p>
                       </div>
-                      {wTrack === 'TRACK_B' && <Check className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
+                      {wTrack === 'RANDOM_DRAW' && <Check className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />}
                     </div>
                   </button>
                 </div>
@@ -645,8 +668,13 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
                       <input
                         type="tel" inputMode="tel"
                         value={wPhone}
-                        onChange={(e) => setWPhone(e.target.value)}
-                        placeholder="8123456789"
+                        onChange={(e) => {
+                          let val = e.target.value.replace(/\D/g, '');
+                          if (val.startsWith('0')) val = val.substring(1);
+                          if (val.startsWith('62')) val = val.substring(2);
+                          setWPhone(val);
+                        }}
+                        placeholder="81234567890"
                         className="w-full px-4 py-3 text-sm font-medium focus:outline-none bg-transparent placeholder:text-slate-400"
                         required
                       />
@@ -666,14 +694,14 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
                     <h3 className="text-xl font-black text-[#0A2578]">Circle Berhasil Dibuat!</h3>
                     <p className="text-sm text-slate-500 mt-2 leading-relaxed max-w-xs mx-auto">
                       <span className="font-bold text-[#0A2578]">{wName.trim() || 'Circle Baru'}</span>{' '}dengan{' '}
-                      <span className={`font-bold ${wTrack === 'TRACK_A' ? 'text-[#5A83DB]' : 'text-emerald-600'}`}>
-                        {wTrack === 'TRACK_A' ? 'Track A · SPSB' : 'Track B · Roda Pengocokan'}
+                      <span className={`font-bold ${wTrack === 'SPSB' ? 'text-[#5A83DB]' : 'text-emerald-600'}`}>
+                        {wTrack === 'SPSB' ? 'Track A · SPSB' : 'Track B · Roda Pengocokan'}
                       </span>{' '}siap digunakan.
                     </p>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-100">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Mengalihkan ke {wTrack === 'TRACK_A' ? 'Dashboard' : 'Roda Pengocokan'}…</span>
+                    <span>Mengalihkan ke {wTrack === 'SPSB' ? 'Dashboard' : 'Roda Pengocokan'}…</span>
                   </div>
                 </div>
               ) : (
@@ -681,19 +709,19 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
                   <div>
                     <h3 className="text-lg font-black text-[#0A2578]">Verifikasi WhatsApp OTP</h3>
                     <p className="text-sm text-slate-500 mt-0.5">
-                      Kode 4-digit dikirim ke{' '}
-                      <span className="font-bold text-[#0A2578]">+62 {wPhone.slice(0, 3)}****{wPhone.slice(-2) || '89'}</span>
+                      Kode 6-digit dikirim ke{' '}
+                      <span className="font-bold text-[#0A2578]">{formatPhoneNumberDisplay(wPhone)}</span>
                     </p>
                   </div>
-                  <div className="flex justify-center gap-3">
-                    {[0, 1, 2, 3].map((i) => (
+                  <div className="flex justify-center gap-2">
+                    {[0, 1, 2, 3, 4, 5].map((i) => (
                       <input
                         key={i} id={`wotp-${i}`}
                         type="text" inputMode="numeric" maxLength={1}
                         value={wOtp[i]}
                         onChange={(e) => handleWOtpInput(i, e.target.value)}
                         onKeyDown={(e) => handleWOtpKeyDown(i, e)}
-                        className="w-14 h-16 text-center text-2xl font-black text-[#0A2578] border-2 border-slate-200 bg-slate-50 rounded-2xl focus:border-[#5A83DB] focus:ring-2 focus:ring-[#5A83DB]/25 focus:bg-white outline-none transition-all shadow-sm"
+                        className="w-10 h-12 text-center text-xl font-black text-[#0A2578] border-2 border-slate-200 bg-slate-50 rounded-xl focus:border-[#5A83DB] focus:ring-2 focus:ring-[#5A83DB]/25 focus:bg-white outline-none transition-all shadow-sm"
                         autoFocus={i === 0}
                       />
                     ))}
@@ -740,7 +768,7 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
               </button>
             )}
             {step === 4 && (
-              <button onClick={handleVerify} disabled={wOtp.join('').length < 4 || wLoading}
+              <button onClick={handleVerify} disabled={wOtp.join('').length < 6 || wLoading}
                 className="flex-1 flex items-center justify-center gap-2 bg-[#F84A4D] text-white font-bold py-3 rounded-xl hover:bg-[#e03a3d] transition-all shadow-md disabled:opacity-50 disabled:pointer-events-none text-sm">
                 {wLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" />Verifikasi & Buat Circle</>}
               </button>
@@ -756,12 +784,25 @@ function CircleWizardModal({ isOpen, onClose, onComplete }: WizardProps) {
    APP COMPONENT
 ══════════════════════════════════════════════════════════ */
 export default function App() {
-  /* ── Core state ── */
-  const [screen,  setScreenState] = useState<Screen>(() => {
-    const s = HASH_TO_SCREEN[window.location.hash];
-    return s ?? 'landing';
+  const [user, setUser] = useState<UserState>(() => {
+    const token = localStorage.getItem('token');
+    const isValidToken = token && token !== 'undefined' && token !== 'null';
+    return {
+      isLoggedIn: !!isValidToken,
+      role: 'OWNER',
+      name: 'Farrel Abda',
+      initials: 'FA',
+      reputation: 98,
+    };
   });
-  const [user,        setUser]      = useState<UserState>(INITIAL_USER);
+
+  const [screen, setScreenState] = useState<Screen>(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return 'landing';
+    const s = HASH_TO_SCREEN[window.location.hash];
+    return s ?? 'dashboard';
+  });
+
   const [circles,     setCircles]   = useState<CircleState[]>(INITIAL_CIRCLES);
   const [circle,      setCircle]    = useState<CircleState>(INITIAL_CIRCLES[0]);
   const [sidebarOpen, setSidebar]   = useState(false);
@@ -769,16 +810,15 @@ export default function App() {
   const [payOpen,     setPayOpen]   = useState(false);
   const [toasts,      setToasts]    = useState<Toast[]>([]);
 
-  /* Landing form */
   const [activeTab,    setActiveTab]  = useState<'invite' | 'new'>('invite');
-  const [phone,        setPhone]      = useState('8123456789');
+  const [phone,        setPhone]      = useState('81234567890');
   const [inviteCode,   setInviteCode] = useState('');
-  const [otpValues,    setOtpValues]  = useState(['1', '2', '3', '4']);
+  
+  const [otpValues,    setOtpValues]  = useState(['', '', '', '', '', '']);
   const [otpOpen,      setOtpOpen]    = useState(false);
   const [loginLoading, setLoading]    = useState(false);
   const [wizardOpen,   setWizardOpen] = useState(false);
 
-  /* ── Toast Methods ── */
   const addToast = useCallback((message: string, type: Toast['type'] = 'success') => {
     const id = Math.random().toString(36).slice(2, 9);
     setToasts((p) => [...p, { id, message, type }]);
@@ -794,11 +834,10 @@ export default function App() {
     setToasts((p) => p.filter((t) => t.id !== id));
   }, []);
 
-  /* ── FSM Navigate ── */
   const navigate = useCallback((target: Screen, currentCircle?: CircleState) => {
     const activeCircle = currentCircle ?? circle;
 
-    if (target === 'spsb_auction' && activeCircle.trackType === 'TRACK_B') {
+    if (target === 'spsb_auction' && activeCircle.trackType === 'RANDOM_DRAW') {
       setScreenState('spin_wheel');
       window.location.hash = SCREEN_TO_HASH['spin_wheel'];
       setSidebar(false);
@@ -806,7 +845,7 @@ export default function App() {
       return;
     }
 
-    if (target === 'spin_wheel' && activeCircle.trackType === 'TRACK_A') {
+    if (target === 'spin_wheel' && activeCircle.trackType === 'SPSB') {
       setScreenState('spsb_auction');
       window.location.hash = SCREEN_TO_HASH['spsb_auction'];
       setSidebar(false);
@@ -819,7 +858,6 @@ export default function App() {
     setSidebar(false);
   }, [circle, addToast]);
 
-  /* Sync hash → screen */
   useEffect(() => {
     const handler = () => {
       const s = HASH_TO_SCREEN[window.location.hash];
@@ -828,178 +866,134 @@ export default function App() {
         window.location.hash = '#/';
         return;
       }
-      if (s === 'spsb_auction' && circle.trackType === 'TRACK_B') {
-        window.location.hash = SCREEN_TO_HASH['spin_wheel'];
-        setScreenState('spin_wheel');
-        setTimeout(() => addToast('Circle Track B hanya menggunakan Roda Pengocokan.', 'warning'), 0);
-        return;
-      }
-      if (s === 'spin_wheel' && circle.trackType === 'TRACK_A') {
-        window.location.hash = SCREEN_TO_HASH['spsb_auction'];
-        setScreenState('spsb_auction');
-        setTimeout(() => addToast('Circle Track A menggunakan Room Lelang SPSB.', 'info'), 0);
-        return;
-      }
       setScreenState(s);
     };
     window.addEventListener('hashchange', handler);
     return () => window.removeEventListener('hashchange', handler);
-  }, [user.isLoggedIn, circle.trackType, addToast]);
+  }, [user.isLoggedIn]);
 
-  /* ── Payment ── */
   const openPayment = useCallback((amount: number, purpose: string) => {
     setPayCtx({ amount, purpose });
     setPayOpen(true);
   }, []);
 
-  /* ── AUTH HANDLERS INTEGRASI BACKEND GO ── */
-  const handleOTPRequest = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
+  // HANDLER REQUEST OTP DENGAN NORMALISASI NOMOR TELEPON
+  const handleOTPRequest = useCallback(async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     try {
       setLoading(true);
-      await userWalletService.requestOTP(phone);
-      addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 1234)', 'info');
+      setOtpValues(['', '', '', '', '', '']); // Reset kotak OTP
+      const normalizedPhone = normalizePhoneForApi(phone);
+      await userWalletService.requestOTP(normalizedPhone);
+      addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 123456)', 'info');
       setOtpOpen(true);
+      setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
     } catch {
       setOtpOpen(true);
+      setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
     } finally {
       setLoading(false);
     }
   }, [phone, addToast]);
 
-  // Handler Join Circle via Kode Undangan (Real-backend API)
-  const handleJoinCircle = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      if (inviteCode.trim()) {
-        const res = await circleService.joinCircle(inviteCode);
-        if (res.data) {
-          addToast(`Berhasil bergabung ke kelompok arisan ${inviteCode}!`, 'success');
-        }
-      }
-      // Verifikasi OTP & terbitkan token JWT
-      const resAuth = await userWalletService.verifyOTP(phone || '8123456789', '1234');
-      if (resAuth.data?.data?.token) {
-        localStorage.setItem('token', resAuth.data.data.token);
-      }
-      const uData = resAuth.data?.data?.user;
-      const userName = uData?.full_name || 'Pengguna';
-      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-
-      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
-      setOtpOpen(false);
-      setScreenState('dashboard');
-      window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast(`Masuk sebagai ${userName}`, 'success');
-    } catch {
-      localStorage.setItem('token', 'demo-mock-jwt-token');
-      setUser((u) => ({ ...u, isLoggedIn: true }));
-      setOtpOpen(false);
-      setScreenState('dashboard');
-      window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast('Masuk dalam Mode Demo', 'info');
-    } finally {
-      setLoading(false);
-    }
-  }, [inviteCode, phone, addToast]);
-
+  // HANDLER LOGIN KE BACKEND GO
   const handleLogin = useCallback(async () => {
     const otpCode = otpValues.join('');
+    if (otpCode.length < 6) {
+      addToast('Masukkan 6 digit kode OTP secara lengkap', 'warning');
+      return;
+    }
+
     try {
       setLoading(true);
-      const res = await userWalletService.verifyOTP(phone || '8123456789', otpCode || '1234');
+      const normalizedPhone = normalizePhoneForApi(phone || '81234567890');
+      const res = await userWalletService.verifyOTP(normalizedPhone, otpCode, inviteCode);
 
-      if (res.data?.data?.token) {
-        localStorage.setItem('token', res.data.data.token);
+      const token = res.data?.data?.token || res.data?.token;
+      if (token) {
+        localStorage.setItem('token', token);
+        const uData = res.data?.data?.user || res.data?.user;
+        const userName = uData?.full_name || 'Farrel Abda';
+        const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+
+        setUser({
+          isLoggedIn: true,
+          role: 'OWNER',
+          name: userName,
+          initials: userInitials || 'FA',
+          reputation: 98,
+        });
+
+        setOtpOpen(false);
+        setScreenState('dashboard');
+        window.location.hash = SCREEN_TO_HASH['dashboard'];
+        addToast(`Login berhasil sebagai ${userName}!`, 'success');
+      } else {
+        throw new Error('Respon token tidak ditemukan');
       }
-
-      const uData = res.data?.data?.user;
-      const userName = uData?.full_name || 'Pengguna';
-      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-
-      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
-      setOtpOpen(false);
-      setScreenState('dashboard');
-      window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast(`Login berhasil sebagai ${userName}!`, 'success');
-    } catch {
-      localStorage.setItem('token', 'demo-mock-jwt-token');
-      setUser((u) => ({ ...u, isLoggedIn: true }));
-      setOtpOpen(false);
-      setScreenState('dashboard');
-      window.location.hash = SCREEN_TO_HASH['dashboard'];
-      addToast('Login Demo Mode (Fallback)', 'info');
+    } catch (err: any) {
+      const serverMsg = err.response?.data?.message || 'Gagal memverifikasi OTP. Pastikan backend Go aktif.';
+      addToast(serverMsg, 'error');
     } finally {
       setLoading(false);
     }
-  }, [phone, otpValues, addToast]);
-
-  const handleQuickLogin = useCallback(async () => {
-    setPhone('8123456789');
-    setOtpValues(['1', '2', '3', '4']);
-    setLoading(true);
-
-    try {
-      const res = await userWalletService.verifyOTP('8123456789', '1234');
-      if (res.data?.data?.token) {
-        localStorage.setItem('token', res.data.data.token);
-      }
-      const uData = res.data?.data?.user;
-      const userName = uData?.full_name || 'Farrel Abda';
-      const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-
-      setUser((u) => ({ ...u, isLoggedIn: true, name: userName, initials: userInitials }));
-      addToast(`Masuk sebagai ${userName} (Ketua)`, 'success');
-    } catch {
-      localStorage.setItem('token', 'demo-mock-jwt-token');
-      setUser((u) => ({ ...u, isLoggedIn: true, name: 'Farrel Abda', initials: 'FA' }));
-      addToast('Masuk sebagai Farrel Abda (Ketua)', 'success');
-    } finally {
-      setLoading(false);
-      setScreenState('dashboard');
-      window.location.hash = SCREEN_TO_HASH['dashboard'];
-    }
-  }, [addToast]);
+  }, [phone, otpValues, inviteCode, addToast]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
     setUser((u) => ({ ...u, isLoggedIn: false }));
     setScreenState('landing');
     window.location.hash = '#/';
-  }, []);
+    addToast('Berhasil keluar', 'info');
+  }, [addToast]);
 
-  /* ── Circle change ── */
   const handleCircleChange = useCallback((c: CircleState) => {
     setCircle(c);
-    if (c.trackType === 'TRACK_B' && screen === 'spsb_auction') navigate('spin_wheel', c);
-    else if (c.trackType === 'TRACK_A' && screen === 'spin_wheel') navigate('spsb_auction', c);
+    if (c.trackType === 'RANDOM_DRAW' && screen === 'spsb_auction') navigate('spin_wheel', c);
+    else if (c.trackType === 'SPSB' && screen === 'spin_wheel') navigate('spsb_auction', c);
     addToast(`Circle "${c.name}" aktif.`, 'info');
   }, [screen, navigate, addToast]);
 
-  /* ── Demo Track Switcher ── */
   const handleDemoSwitch = useCallback((track: TrackType) => {
     const target = circles.find((c) => c.trackType === track) ?? circles[0];
     setCircle(target);
-    const dest: Screen = track === 'TRACK_A' ? 'spsb_auction' : 'spin_wheel';
+    const dest: Screen = track === 'SPSB' ? 'spsb_auction' : 'spin_wheel';
     setScreenState(dest);
     window.location.hash = SCREEN_TO_HASH[dest];
     setSidebar(false);
-    addToast(`Demo: ${track === 'TRACK_A' ? 'Track A · Room Lelang SPSB' : 'Track B · Roda Pengocokan'}`, 'info');
+    addToast(`Demo: ${track === 'SPSB' ? 'Track A · Room Lelang SPSB' : 'Track B · Roda Pengocokan'}`, 'info');
   }, [circles, addToast]);
 
-  /* ── OTP handlers ── */
   const handleOtpInput = useCallback((index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return;
-    setOtpValues((p) => { const n = [...p]; n[index] = value.slice(-1); return n; });
-    if (value && index < 3) document.getElementById(`otp-${index + 1}`)?.focus();
+    const char = value.replace(/\D/g, '').slice(-1);
+    setOtpValues((p) => { const n = [...p]; n[index] = char; return n; });
+    if (char && index < 5) {
+      const nextEl = document.getElementById(`otp-${index + 1}`);
+      nextEl?.focus();
+    }
   }, []);
 
   const handleOtpKeyDown = useCallback((index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otpValues[index] && index > 0) document.getElementById(`otp-${index - 1}`)?.focus();
+    if (e.key === 'Backspace' && !otpValues[index] && index > 0) {
+      const prevEl = document.getElementById(`otp-${index - 1}`);
+      prevEl?.focus();
+    }
   }, [otpValues]);
 
-  /* ── Wizard complete (Simpan Circle Baru ke Backend Supabase) ── */
+  const handleOtpPaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (!pasted) return;
+
+    const newValues = ['', '', '', '', '', ''];
+    for (let i = 0; i < pasted.length; i++) {
+      newValues[i] = pasted[i];
+    }
+    setOtpValues(newValues);
+    const focusIdx = Math.min(pasted.length, 5);
+    document.getElementById(`otp-${focusIdx}`)?.focus();
+  }, []);
+
   const handleWizardComplete = useCallback(async (name: string, track: TrackType) => {
     try {
       const res = await circleService.createCircle({
@@ -1009,8 +1003,8 @@ export default function App() {
       });
 
       const newCircle: CircleState = res.data?.data ? {
-        id: res.data.data.id || 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
-        name: res.data.data.name || name,
+        id: res.data.data.circle_id || 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
+        name: res.data.data.circle_name || name,
         trackType: track,
       } : {
         id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
@@ -1023,7 +1017,7 @@ export default function App() {
       setUser((u) => ({ ...u, isLoggedIn: true }));
       setWizardOpen(false);
 
-      const dest: Screen = track === 'TRACK_A' ? 'dashboard' : 'spin_wheel';
+      const dest: Screen = track === 'SPSB' ? 'dashboard' : 'spin_wheel';
       setScreenState(dest);
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
@@ -1037,16 +1031,15 @@ export default function App() {
       setCircle(fallbackCircle);
       setUser((u) => ({ ...u, isLoggedIn: true }));
       setWizardOpen(false);
-      const dest: Screen = track === 'TRACK_A' ? 'dashboard' : 'spin_wheel';
+      const dest: Screen = track === 'SPSB' ? 'dashboard' : 'spin_wheel';
       setScreenState(dest);
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" dibuat dalam mode lokal.`, 'info');
     }
   }, [addToast]);
 
-  /* ── Dashboard nav adapter ── */
   const handleDashboardNav = useCallback((s: string) => {
-    if      (s === 'auction')   navigate(circle.trackType === 'TRACK_A' ? 'spsb_auction' : 'spin_wheel');
+    if      (s === 'auction')   navigate(circle.trackType === 'SPSB' ? 'spsb_auction' : 'spin_wheel');
     else if (s === 'spin')      navigate('spin_wheel');
     else if (s === 'matrix')    navigate('payment_matrix');
     else if (s === 'crowdfund') navigate('crowdfunding');
@@ -1054,10 +1047,8 @@ export default function App() {
     else navigate('dashboard');
   }, [circle.trackType, navigate]);
 
-  /* ── Screen renderer ── */
   const renderScreen = (): React.ReactNode => {
     if (!user.isLoggedIn) return null;
-
     const toDash = () => navigate('dashboard');
 
     switch (screen) {
@@ -1083,8 +1074,8 @@ export default function App() {
           <ErrorBoundary fallbackLabel="Roda Pengocokan Error">
             <SpinWheel
               embedded onBack={toDash}
-              trackType={circle.trackType === 'TRACK_B' ? 'B' : 'A'}
-              userRole={user.role === 'LEADER' ? 'leader' : 'member'}
+              trackType={circle.trackType === 'RANDOM_DRAW' ? 'B' : 'A'}
+              userRole={user.role === 'OWNER' ? 'leader' : 'member'}
               duesPct={100}
               onNavigateToAuction={() => navigate('spsb_auction')}
             />
@@ -1105,8 +1096,8 @@ export default function App() {
           <ErrorBoundary fallbackLabel="Matriks Pembayaran Error">
             <PaymentMatrix
               embedded onBack={toDash}
-              trackType={circle.trackType}
-              userRole={user.role === 'LEADER' ? 'leader' : 'member'}
+              trackType={circle.trackType === 'SPSB' ? 'TRACK_A' : 'TRACK_B'}
+              userRole={user.role === 'OWNER' ? 'leader' : 'member'}
               circleId={circle.id}
               onOpenPayment={() => openPayment(1_000_000, 'Iuran Bulanan Siklus 4')}
             />
@@ -1131,7 +1122,6 @@ export default function App() {
     }
   };
 
-  /* ── Shared sidebar props ── */
   const sidebarProps: SidebarContentProps = {
     screen, user, circle, circles,
     onNavigate:     navigate,
@@ -1141,15 +1131,11 @@ export default function App() {
     onDemoSwitch:   handleDemoSwitch,
   };
 
-  /* ══════════════════════════════════════════════════════
-     LANDING PAGE (unauthenticated)
-  ══════════════════════════════════════════════════════ */
   if (!user.isLoggedIn) {
     const authProps: AuthCardProps = {
       activeTab, setActiveTab, inviteCode, setInviteCode,
       phone, setPhone, loginLoading,
       onOTPRequest: handleOTPRequest,
-      onJoinCircle: handleJoinCircle,
       onOpenWizard: () => setWizardOpen(true),
     };
 
@@ -1161,7 +1147,7 @@ export default function App() {
             <span className="text-white font-bold text-xl tracking-tight">ArisanKita</span>
           </div>
           <button
-            onClick={handleQuickLogin}
+            onClick={() => handleOTPRequest()}
             disabled={loginLoading}
             className="text-sm font-semibold px-5 py-2 text-white border border-white/20 hover:bg-white/10 rounded-xl transition-colors disabled:opacity-60 flex items-center gap-2"
           >
@@ -1249,6 +1235,7 @@ export default function App() {
 
         <CircleWizardModal isOpen={wizardOpen} onClose={() => setWizardOpen(false)} onComplete={handleWizardComplete} />
 
+        {/* MODAL VERIFIKASI OTP WHATSAPP */}
         {otpOpen && (
           <div
             className="fixed inset-0 z-[100] flex items-end lg:items-center justify-center bg-slate-900/50 backdrop-blur-sm lg:p-4"
@@ -1261,7 +1248,7 @@ export default function App() {
               <div className="flex items-center justify-between px-6 py-4 lg:py-5 border-b border-slate-100">
                 <div>
                   <h2 className="font-bold text-lg text-[#0A2578]">Verifikasi WhatsApp OTP</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Kode 4-digit dikirim ke WhatsApp Anda</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Kode 6-digit dikirim ke WhatsApp Anda</p>
                 </div>
                 <button onClick={() => setOtpOpen(false)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-full transition-colors">
                   <X className="w-5 h-5" />
@@ -1272,18 +1259,20 @@ export default function App() {
                   <p className="text-sm text-slate-600 mb-6">
                     Kode dikirim ke{' '}
                     <span className="font-bold text-[#0A2578] bg-[#0A2578]/5 px-2.5 py-1 rounded-lg inline-block mt-1">
-                      +62 {phone.slice(0, 3)}****{phone.slice(-2) || '89'}
+                      {formatPhoneNumberDisplay(phone)}
                     </span>
                   </p>
-                  <div className="flex justify-center gap-3 lg:gap-4">
-                    {[0, 1, 2, 3].map((i) => (
+
+                  <div className="flex justify-center gap-2">
+                    {[0, 1, 2, 3, 4, 5].map((i) => (
                       <input
                         key={i} id={`otp-${i}`}
                         type="text" inputMode="numeric" maxLength={1}
                         value={otpValues[i]}
                         onChange={(e) => handleOtpInput(i, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                        className="w-14 h-16 lg:w-16 lg:h-[72px] text-center text-2xl font-black text-[#0A2578] border-2 border-slate-200 bg-slate-50 rounded-2xl focus:border-[#5A83DB] focus:ring-2 focus:ring-[#5A83DB]/25 focus:bg-white outline-none transition-all shadow-sm"
+                        onPaste={handleOtpPaste}
+                        className="w-10 h-12 text-center text-xl font-black text-[#0A2578] border-2 border-slate-200 bg-slate-50 rounded-xl focus:border-[#5A83DB] focus:ring-2 focus:ring-[#5A83DB]/25 focus:bg-white outline-none transition-all shadow-sm"
                         autoFocus={i === 0}
                       />
                     ))}
@@ -1291,10 +1280,10 @@ export default function App() {
                 </div>
                 <button
                   onClick={handleLogin}
-                  className="w-full bg-[#F84A4D] hover:bg-[#e03a3d] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-[#F84A4D]/25 active:scale-[0.98] flex items-center justify-center gap-2"
+                  disabled={loginLoading || otpValues.join('').length < 6}
+                  className="w-full bg-[#F84A4D] hover:bg-[#e03a3d] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-[#F84A4D]/25 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
                 >
-                  <Check className="w-5 h-5" />
-                  Verifikasi & Masuk
+                  {loginLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <><Check className="w-5 h-5" />Verifikasi & Masuk</>}
                 </button>
               </div>
             </div>
@@ -1306,9 +1295,6 @@ export default function App() {
     );
   }
 
-  /* ══════════════════════════════════════════════════════
-     APP SHELL (authenticated)
-  ══════════════════════════════════════════════════════ */
   return (
     <div className="w-full min-h-screen bg-[#FFF6ED] flex flex-col lg:flex-row font-sans antialiased selection:bg-[#F84A4D]/20">
       <aside className="hidden lg:flex w-[280px] shrink-0 bg-[#0A2578] text-white flex-col gap-4 p-5 sticky top-0 h-screen overflow-y-auto">

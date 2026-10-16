@@ -4,16 +4,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Legacy alias handlers untuk backwards-compatibility frontend
 
-func CreateGroup(c *gin.Context) {
-	CreateCircle(c)
+func (h *CircleHandler) CreateGroup(c *gin.Context) {
+	h.CreateCircle(c)
 }
 
-func GetGroupDetail(c *gin.Context) {
-	GetCircleDetail(c)
+func (h *CircleHandler) GetGroupDetail(c *gin.Context) {
+	h.GetCircleDetail(c)
 }
 
-func JoinGroup(c *gin.Context) {
-	JoinCircle(c)
+func (h *CircleHandler) JoinGroup(c *gin.Context) {
+	h.JoinCircle(c)
 }

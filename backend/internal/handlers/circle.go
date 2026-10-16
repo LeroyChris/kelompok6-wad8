@@ -1,108 +1,137 @@
 package handlers
 
 import (
+	"fmt"
+	"math/rand"
 	"net/http"
+	"time"
 
 	"backend-arisankita/internal/dto"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type CreateCircleInput struct {
-	CircleName         string   `json:"circle_name" binding:"required"`
-	TrackType          string   `json:"track_type" binding:"required"` // SPSB, RANDOM_DRAW
-	ContributionAmount float64  `json:"contribution_amount" binding:"required"`
-	MemberLimit        int      `json:"member_limit" binding:"required"`
-	PeriodType         string   `json:"period_type" binding:"required"` // WEEKLY, MONTHLY
-	BidFloorPercent    *float64 `json:"bid_floor_percent,omitempty"`
-	BidCeilingPercent  *float64 `json:"bid_ceiling_percent,omitempty"`
-	StartsAt           *string  `json:"starts_at,omitempty"`
-	// Frontend legacy aliases
-	Name            string  `json:"name"`
-	AmountPerPeriod float64 `json:"amount_per_period"`
-	MaxMembers      int     `json:"max_members"`
+type CircleHandler struct {
+	DB *pgxpool.Pool
 }
 
-// POST /api/v1/circles & POST /api/v1/groups
-func CreateCircle(c *gin.Context) {
+func NewCircleHandler(db *pgxpool.Pool) *CircleHandler {
+	return &CircleHandler{DB: db}
+}
+
+type CreateCircleInput struct {
+	CircleName         string   `json:"circle_name"`
+	Name               string   `json:"name"`                          // Alias dari frontend
+	TrackType          string   `json:"track_type" binding:"required"` // SPSB, RANDOM_DRAW
+	ContributionAmount float64  `json:"contribution_amount"`
+	MonthlyDues        float64  `json:"monthly_dues"` // Alias dari frontend
+	MemberLimit        int      `json:"member_limit"`
+	PeriodType         string   `json:"period_type"`
+	BidFloorPercent    *float64 `json:"bid_floor_percent,omitempty"`
+	BidCeilingPercent  *float64 `json:"bid_ceiling_percent,omitempty"`
+}
+
+type JoinCircleInput struct {
+	InviteCode string `json:"invite_code" binding:"required"`
+}
+
+// POST /api/v1/circles
+func (h *CircleHandler) CreateCircle(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		userID = "11111111-1111-1111-1111-111111111111" // Fallback user demo
+	}
+
 	var input CreateCircleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input tidak valid: "+err.Error(), nil))
 		return
 	}
 
-	// Normalisasi alias
 	name := input.CircleName
 	if name == "" {
 		name = input.Name
 	}
 	amount := input.ContributionAmount
 	if amount == 0 {
-		amount = input.AmountPerPeriod
+		amount = input.MonthlyDues
 	}
 	members := input.MemberLimit
 	if members == 0 {
-		members = input.MaxMembers
-	}
-	trackType := input.TrackType
-	if trackType == "" {
-		trackType = "RANDOM_DRAW"
+		members = 10
 	}
 	periodType := input.PeriodType
 	if periodType == "" {
 		periodType = "MONTHLY"
 	}
 
-	responseData := gin.H{
-		"circle_id":           "c-uuid-101",
-		"id":                  "c-uuid-101", // frontend legacy alias
-		"circle_name":         name,
-		"name":                name,
-		"track_type":          trackType,
-		"contribution_amount": amount,
-		"amount_per_period":   amount,
-		"member_limit":        members,
-		"max_members":         members,
-		"period_type":         periodType,
-		"circle_status":       "RECRUITING",
-		"status":              "active",
-		"created_by_user_id":  "usr-uuid-001",
+	ctx := c.Request.Context()
+	tx, err := h.DB.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memulai transaksi", nil))
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Insert ke tabel circles
+	var circleID string
+	insertCircleSql := `
+		INSERT INTO circles (circle_name, track_type, contribution_amount, member_limit, period_type, created_by_user_id, circle_status)
+		VALUES ($1, $2, $3, $4, $5, $6, 'RECRUITING')
+		RETURNING circle_id;
+	`
+	err = tx.QueryRow(ctx, insertCircleSql, name, input.TrackType, amount, members, periodType, userID).Scan(&circleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menyimpan circle ke DB: "+err.Error(), nil))
+		return
 	}
 
-	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Circle arisan berhasil dibuat", responseData))
-}
-
-// GET /api/v1/circles
-func GetCircles(c *gin.Context) {
-	dummyCircles := []gin.H{
-		{
-			"circle_id":           "c-uuid-101",
-			"id":                  "c-uuid-101",
-			"circle_name":         "Arisan Keluarga Cemara",
-			"name":                "Arisan Keluarga Cemara",
-			"track_type":          "RANDOM_DRAW",
-			"contribution_amount": 500000,
-			"member_limit":        10,
-			"period_type":         "MONTHLY",
-			"circle_status":       "RECRUITING",
-		},
-		{
-			"circle_id":           "c-uuid-102",
-			"id":                  "c-uuid-102",
-			"circle_name":         "Arisan Kantor Finansial",
-			"track_type":          "SPSB",
-			"contribution_amount": 1000000,
-			"member_limit":        12,
-			"period_type":         "MONTHLY",
-			"circle_status":       "RUNNING",
-		},
+	// 2. Insert Pembuat sebagai 'OWNER' di circle_memberships
+	var membershipID string
+	insertMemberSql := `
+		INSERT INTO circle_memberships (circle_id, user_id, membership_role, membership_status)
+		VALUES ($1, $2, 'OWNER', 'ACTIVE')
+		RETURNING circle_membership_id;
+	`
+	err = tx.QueryRow(ctx, insertMemberSql, circleID, userID).Scan(&membershipID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menambahkan keanggotaan owner: "+err.Error(), nil))
+		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil daftar circle", dummyCircles))
+	// 3. Buat Kode Undangan Otomatis di circle_invitations
+	rand.Seed(time.Now().UnixNano())
+	inviteCode := fmt.Sprintf("ARK-%04d", rand.Intn(10000))
+	insertInviteSql := `
+		INSERT INTO circle_invitations (circle_id, invite_code, invitation_status)
+		VALUES ($1, $2, 'ACTIVE');
+	`
+	_, err = tx.Exec(ctx, insertInviteSql, circleID, inviteCode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal membuat kode undangan: "+err.Error(), nil))
+		return
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menyelesaikan pembuatan circle", nil))
+		return
+	}
+
+	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Circle arisan berhasil dibuat", gin.H{
+		"circle_id":            circleID,
+		"id":                   circleID,
+		"circle_name":          name,
+		"name":                 name,
+		"track_type":           input.TrackType,
+		"contribution_amount":  amount,
+		"invite_code":          inviteCode,
+		"circle_membership_id": membershipID,
+	}))
 }
 
 // GET /api/v1/circles/:id & GET /api/v1/groups/:id
-func GetCircleDetail(c *gin.Context) {
+func (h *CircleHandler) GetCircleDetail(c *gin.Context) {
 	id := c.Param("id")
 
 	responseData := gin.H{
@@ -128,33 +157,9 @@ func GetCircleDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail circle", responseData))
 }
 
-// POST /api/v1/circles/:id/lock
-func LockCircle(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Circle berhasil dikunci", gin.H{
-		"circle_id":     id,
-		"circle_status": "LOCKED",
-	}))
-}
-
-// POST /api/v1/circles/:id/invitations
-func CreateInvitation(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Kode undangan berhasil dibuat", gin.H{
-		"circle_id":   id,
-		"invite_code": "ARK-JOIN-8821",
-		"expires_at":  "2026-10-07T00:00:00Z",
-	}))
-}
-
-type JoinCircleInput struct {
-	InviteCode string `json:"invite_code" binding:"required"`
-}
-
 // POST /api/v1/circles/join & POST /api/v1/invitations/join & POST /api/v1/groups/:id/join
-func JoinCircle(c *gin.Context) {
+func (h *CircleHandler) JoinCircle(c *gin.Context) {
 	var input JoinCircleInput
-	// Optional bind jika dipanggil dari path legacy tanpa body
 	_ = c.ShouldBindJSON(&input)
 
 	code := input.InviteCode
@@ -172,25 +177,63 @@ func JoinCircle(c *gin.Context) {
 	}))
 }
 
+// GET /api/v1/circles
+func (h *CircleHandler) GetCircles(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil daftar circle", []gin.H{
+		{
+			"circle_id":           "c-uuid-101",
+			"circle_name":         "Arisan Alumni 2018",
+			"track_type":          "SPSB",
+			"contribution_amount": 1000000,
+			"circle_status":       "RUNNING",
+		},
+		{
+			"circle_id":           "c-uuid-102",
+			"circle_name":         "Arisan Keluarga Besar",
+			"track_type":          "RANDOM_DRAW",
+			"contribution_amount": 500000,
+			"circle_status":       "RECRUITING",
+		},
+	}))
+}
+
+// POST /api/v1/circles/:id/lock
+func (h *CircleHandler) LockCircle(c *gin.Context) {
+	id := c.Param("id")
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Circle berhasil dikunci", gin.H{
+		"circle_id":     id,
+		"circle_status": "LOCKED",
+	}))
+}
+
+// POST /api/v1/circles/:id/invitations
+func (h *CircleHandler) CreateInvitation(c *gin.Context) {
+	id := c.Param("id")
+	c.JSON(http.StatusCreated, dto.BuildResponse(http.StatusCreated, "success", "Kode undangan berhasil dibuat", gin.H{
+		"circle_id":   id,
+		"invite_code": "ARK-JOIN-8821",
+		"expires_at":  "2026-12-31T23:59:59Z",
+	}))
+}
+
 // GET /api/v1/circles/:id/members
-func GetCircleMembers(c *gin.Context) {
+func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil daftar anggota", []gin.H{
 		{"circle_membership_id": "mem-01", "name": "Farrel Abda", "role": "OWNER", "status": "ACTIVE"},
 		{"circle_membership_id": "mem-02", "name": "Roy", "role": "MEMBER", "status": "ACTIVE"},
 	}))
 }
 
-// POST /api/v1/circles/:id/bids (Legacy alias di level circle)
-func SubmitBid(c *gin.Context) {
-	c.JSON(200, gin.H{
+// Legacy Aliases di Level Circle
+func (h *CircleHandler) SubmitBid(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Silakan gunakan endpoint resmi /api/v1/cycles/:id/bids",
 	})
 }
 
-// POST /api/v1/circles/:id/spin (Legacy alias di level circle)
-func SpinWheel(c *gin.Context) {
-	c.JSON(200, gin.H{
+func (h *CircleHandler) SpinWheel(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Silakan gunakan endpoint resmi /api/v1/cycles/:id/draw",
 	})

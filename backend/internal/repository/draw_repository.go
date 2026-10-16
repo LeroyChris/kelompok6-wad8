@@ -32,11 +32,10 @@ func NewDrawRepository(db *pgxpool.Pool) DrawRepository {
 	return &drawRepo{db: db}
 }
 
-// 1. Get Participants dengan Pagination (Menggunakan JOIN circle_memberships & users)
+// 1. Get Participants dengan Pagination (Double Join: cp -> cm -> u)
 func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error) {
 	offset := (page - 1) * pageSize
 
-	// Count total
 	var total int64
 	countQuery := `SELECT COUNT(*) FROM cycle_participants WHERE cycle_id = $1`
 	err := r.db.QueryRow(ctx, countQuery, cycleID).Scan(&total)
@@ -44,7 +43,6 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 		return nil, 0, fmt.Errorf("failed to count participants: %w", err)
 	}
 
-	// Query paginated dengan DOUBLE JOIN (cycle_participants -> circle_memberships -> users)
 	query := `
 		SELECT 
 			cp.cycle_participant_id, 
@@ -173,7 +171,6 @@ func (r *drawRepo) ExecuteDrawTransaction(ctx context.Context, cycleID string, w
 		return "", errors.New("participant record not found or already updated")
 	}
 
-	// Commit Transaction
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}

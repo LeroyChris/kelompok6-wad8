@@ -10,7 +10,6 @@ import (
 )
 
 // AuthMiddleware memverifikasi JWT Bearer token dari header Authorization
-// Pegangan: Anggota 1 (Auth & Security)
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -50,8 +49,12 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("userID", claims["user_id"])
-			c.Set("email", claims["email"])
+			if userID, exists := claims["user_id"]; exists {
+				c.Set("userID", userID)
+			}
+			if email, exists := claims["email"]; exists {
+				c.Set("email", email)
+			}
 		}
 
 		c.Next()

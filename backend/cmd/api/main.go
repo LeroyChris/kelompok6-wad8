@@ -7,8 +7,6 @@ import (
 	"backend-arisankita/internal/config"
 	"backend-arisankita/internal/handlers"
 	"backend-arisankita/internal/middleware"
-	"backend-arisankita/internal/repository"
-	"backend-arisankita/internal/service"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -29,16 +27,14 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
-	// Inisialisasi Layer Repository -> Service -> Handler Instances
+	// Inisialisasi Layer Handlers dengan Database Instance (db)
 	authHandler := handlers.NewAuthHandler(db)
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
-
-	// Inisialisasi Module Draw & Cycle (Real Database Supabase)
-	drawRepo := repository.NewDrawRepository(db)
-	drawService := service.NewDrawService(drawRepo)
-	drawHandler := handlers.NewDrawHandler(drawService)
+	circleHandler := handlers.NewCircleHandler(db)
+	drawHandler := handlers.NewDrawHandler(db)       // ✅ FIX: Memakai db (*pgxpool.Pool) langsung
+	paymentHandler := handlers.NewPaymentHandler(db) // ✅ FIX: Memakai db (*pgxpool.Pool) langsung
 
 	v1 := r.Group("/api/v1")
 	{
@@ -51,9 +47,6 @@ func main() {
 			auth.POST("/otp/verify", authHandler.VerifyOTP)
 			auth.POST("/request-otp", authHandler.RequestOTP)
 			auth.POST("/verify-otp", authHandler.VerifyOTP)
-			auth.POST("/google", authHandler.GoogleAuth)
-			auth.POST("/register", authHandler.Register)
-			auth.POST("/login", authHandler.Login)
 		}
 
 		users := v1.Group("/users")
@@ -61,12 +54,7 @@ func main() {
 		{
 			users.GET("/me", userHandler.GetUserProfile)
 			users.PATCH("/me", userHandler.UpdateProfile)
-			users.GET("/me/win-history", userHandler.GetWinHistory)
 			users.GET("/me/reputation", userHandler.GetUserReputation)
-
-			// Legacy alias
-			users.GET("/profile", userHandler.GetUserProfile)
-			users.PUT("/profile", userHandler.UpdateProfile)
 		}
 
 		// -------------------------------------------------------------
@@ -97,39 +85,35 @@ func main() {
 		circles := v1.Group("/circles")
 		circles.Use(middleware.AuthMiddleware())
 		{
-			circles.POST("", handlers.CreateCircle)
-			circles.POST("/join", handlers.JoinCircle)
-			circles.GET("", handlers.GetCircles)
-			circles.GET("/:id", handlers.GetCircleDetail)
-			circles.POST("/:id/lock", handlers.LockCircle)
-			circles.POST("/:id/invitations", handlers.CreateInvitation)
-			circles.GET("/:id/members", handlers.GetCircleMembers)
+			circles.POST("", circleHandler.CreateCircle)
+			circles.POST("/join", circleHandler.JoinCircle)
+			circles.GET("", circleHandler.GetCircles)
+			circles.GET("/:id", circleHandler.GetCircleDetail)
+			circles.POST("/:id/lock", circleHandler.LockCircle)
+			circles.POST("/:id/invitations", circleHandler.CreateInvitation)
+			circles.GET("/:id/members", circleHandler.GetCircleMembers)
 
 			// Relasi Siklus per Circle
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
-
-			// Legacy spin & bids di circle level
-			circles.POST("/:id/bids", handlers.SubmitBid)
-			circles.POST("/:id/spin", handlers.SpinWheel)
 		}
 
 		invitations := v1.Group("/invitations")
 		invitations.Use(middleware.AuthMiddleware())
 		{
-			invitations.POST("/join", handlers.JoinCircle)
+			invitations.POST("/join", circleHandler.JoinCircle)
 		}
 
 		// Legacy alias /groups untuk frontend
 		groups := v1.Group("/groups")
 		groups.Use(middleware.AuthMiddleware())
 		{
-			groups.POST("", handlers.CreateGroup)
-			groups.GET("/:id", handlers.GetGroupDetail)
-			groups.POST("/:id/join", handlers.JoinGroup)
+			groups.POST("", circleHandler.CreateGroup)
+			groups.GET("/:id", circleHandler.GetGroupDetail)
+			groups.POST("/:id/join", circleHandler.JoinGroup)
 		}
 
 		// -------------------------------------------------------------
-		// Modul 2.4 & 2.5: Siklus Arisan, Partisipan & Mesin Lelang/Kocok (Track 3)
+		// Modul 2.4 & 2.5: Siklus Arisan & Mesin Lelang/Kocok (Track 3)
 		// -------------------------------------------------------------
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
@@ -142,7 +126,6 @@ func main() {
 			cycles.GET("/:id/award", drawHandler.GetCycleAward)
 		}
 
-		// Legacy alias /draws
 		draws := v1.Group("/draws")
 		draws.Use(middleware.AuthMiddleware())
 		{
@@ -155,23 +138,21 @@ func main() {
 		obligations := v1.Group("/obligations")
 		obligations.Use(middleware.AuthMiddleware())
 		{
-			obligations.POST("/:id/pay", handlers.PayObligation)
+			obligations.POST("/:id/pay", paymentHandler.PayObligation) // ✅ FIX: Menggunakan paymentHandler
 		}
 
 		payments := v1.Group("/payments")
 		payments.Use(middleware.AuthMiddleware())
 		{
-			payments.GET("/:id", handlers.GetPaymentDetail)
-			payments.POST("/:id/proof", handlers.UploadPaymentProof)
-
-			// Legacy aliases
-			payments.POST("", handlers.SubmitPayment)
-			payments.GET("/group/:id", handlers.GetGroupPayments)
-			payments.PATCH("/:id/verify", handlers.VerifyPayment)
+			payments.GET("/:id", paymentHandler.GetPaymentDetail)          // ✅ FIX: Menggunakan paymentHandler
+			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof) // ✅ FIX: Menggunakan paymentHandler
+			payments.POST("", paymentHandler.SubmitPayment)
+			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
+			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)
 		}
 
-		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), handlers.ReviewPaymentProof)
-		v1.POST("/webhooks/payment-gateway", handlers.HandlePaymentGatewayWebhook)
+		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), paymentHandler.ReviewPaymentProof)
+		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook) // ✅ FIX: Menggunakan paymentHandler
 	}
 
 	port := os.Getenv("PORT")

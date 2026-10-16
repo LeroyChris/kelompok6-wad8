@@ -2,7 +2,7 @@ import API from './api';
 
 export interface CreateCirclePayload {
   name: string;
-  track_type: 'TRACK_A' | 'TRACK_B';
+  track_type: 'SPSB' | 'RANDOM_DRAW'; // ✅ SUDAH DISINKRONKAN KE DB
   monthly_dues: number;
 }
 
