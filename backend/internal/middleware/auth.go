@@ -9,7 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// AuthMiddleware memverifikasi JWT Bearer token dari header Authorization
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -51,12 +50,50 @@ func AuthMiddleware() gin.HandlerFunc {
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			if userID, exists := claims["user_id"]; exists {
 				c.Set("userID", userID)
+				c.Set("user_id", userID)
 			}
 			if email, exists := claims["email"]; exists {
 				c.Set("email", email)
 			}
+			if role, exists := claims["role"]; exists {
+				c.Set("role", role)
+			} else {
+				c.Set("role", "MEMBER")
+			}
 		}
 
 		c.Next()
+	}
+}
+
+func RequireRole(allowedRoles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		val, exists := c.Get("role")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code":    http.StatusForbidden,
+				"status":  "error",
+				"message": "Akses ditolak: role pengguna tidak teridentifikasi",
+			})
+			return
+		}
+
+		userRole, ok := val.(string)
+		if !ok {
+			userRole = "MEMBER"
+		}
+
+		for _, allowed := range allowedRoles {
+			if strings.EqualFold(userRole, allowed) {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":    http.StatusForbidden,
+			"status":  "error",
+			"message": "Akses ditolak: Anda tidak memiliki wewenang (role tidak memenuhi syarat)",
+		})
 	}
 }

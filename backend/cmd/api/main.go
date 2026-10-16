@@ -7,6 +7,8 @@ import (
 	"backend-arisankita/internal/config"
 	"backend-arisankita/internal/handlers"
 	"backend-arisankita/internal/middleware"
+	"backend-arisankita/internal/repository"
+	"backend-arisankita/internal/service"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -27,20 +29,38 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
-	// Inisialisasi Layer Handlers dengan Database Instance (db)
+	// Inisialisasi Layer Repositories & Services
+	drawRepo := repository.NewDrawRepository(db)
+	drawService := service.NewDrawService(drawRepo)
+
+	// Inisialisasi Layer Handlers
 	authHandler := handlers.NewAuthHandler(db)
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
 	circleHandler := handlers.NewCircleHandler(db)
-	drawHandler := handlers.NewDrawHandler(db)       // ✅ FIX: Memakai db (*pgxpool.Pool) langsung
-	paymentHandler := handlers.NewPaymentHandler(db) // ✅ FIX: Memakai db (*pgxpool.Pool) langsung
+	drawHandler := handlers.NewDrawHandler(drawService)
+	paymentHandler := handlers.NewPaymentHandler(db)
+
+	healthHandler := func(c *gin.Context) {
+		dbStatus := "disconnected"
+		if db != nil {
+			if err := db.Ping(c.Request.Context()); err == nil {
+				dbStatus = "connected"
+			}
+		}
+		c.JSON(200, gin.H{
+			"status":   "ok",
+			"database": dbStatus,
+		})
+	}
+	r.GET("/health", healthHandler)
 
 	v1 := r.Group("/api/v1")
 	{
-		// -------------------------------------------------------------
-		// Modul 2.1: Autentikasi & Identitas Pengguna (Track 1)
-		// -------------------------------------------------------------
+		v1.GET("/health", healthHandler)
+
+		// Autentikasi & Identitas
 		auth := v1.Group("/auth")
 		{
 			auth.POST("/otp/request", authHandler.RequestOTP)
@@ -57,9 +77,7 @@ func main() {
 			users.GET("/me/reputation", userHandler.GetUserReputation)
 		}
 
-		// -------------------------------------------------------------
-		// Modul In-App Wallet (Track 1)
-		// -------------------------------------------------------------
+		// In-App Wallet
 		wallet := v1.Group("/wallet")
 		wallet.Use(middleware.AuthMiddleware())
 		{
@@ -68,9 +86,7 @@ func main() {
 			wallet.POST("/topup", walletHandler.TopUpWallet)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.2: Rekening Bank & Validasi (Track 1)
-		// -------------------------------------------------------------
+		// Rekening Bank
 		bankAccounts := v1.Group("/bank-accounts")
 		bankAccounts.Use(middleware.AuthMiddleware())
 		{
@@ -79,9 +95,7 @@ func main() {
 			bankAccounts.DELETE("/:id", bankHandler.DeleteBankAccount)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.3: Manajemen Circle & Keanggotaan (Track 2)
-		// -------------------------------------------------------------
+		// Manajemen Circle
 		circles := v1.Group("/circles")
 		circles.Use(middleware.AuthMiddleware())
 		{
@@ -93,8 +107,9 @@ func main() {
 			circles.POST("/:id/invitations", circleHandler.CreateInvitation)
 			circles.GET("/:id/members", circleHandler.GetCircleMembers)
 
-			// Relasi Siklus per Circle
+			// Relasi Siklus
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
+			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)
 		}
 
 		invitations := v1.Group("/invitations")
@@ -103,7 +118,6 @@ func main() {
 			invitations.POST("/join", circleHandler.JoinCircle)
 		}
 
-		// Legacy alias /groups untuk frontend
 		groups := v1.Group("/groups")
 		groups.Use(middleware.AuthMiddleware())
 		{
@@ -112,9 +126,7 @@ func main() {
 			groups.POST("/:id/join", circleHandler.JoinGroup)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.4 & 2.5: Siklus Arisan & Mesin Lelang/Kocok (Track 3)
-		// -------------------------------------------------------------
+		// Siklus & Mesin Lelang/Kocok
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
 		{
@@ -132,27 +144,25 @@ func main() {
 			draws.GET("/group/:id", drawHandler.GetGroupDraws)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.6: Pembayaran Tagihan & Bukti Transaksi (Track 3)
-		// -------------------------------------------------------------
+		// Pembayaran & Tagihan
 		obligations := v1.Group("/obligations")
 		obligations.Use(middleware.AuthMiddleware())
 		{
-			obligations.POST("/:id/pay", paymentHandler.PayObligation) // ✅ FIX: Menggunakan paymentHandler
+			obligations.POST("/:id/pay", paymentHandler.PayObligation)
 		}
 
 		payments := v1.Group("/payments")
 		payments.Use(middleware.AuthMiddleware())
 		{
-			payments.GET("/:id", paymentHandler.GetPaymentDetail)          // ✅ FIX: Menggunakan paymentHandler
-			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof) // ✅ FIX: Menggunakan paymentHandler
+			payments.GET("/:id", paymentHandler.GetPaymentDetail)
+			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof)
 			payments.POST("", paymentHandler.SubmitPayment)
 			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
 			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)
 		}
 
 		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), paymentHandler.ReviewPaymentProof)
-		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook) // ✅ FIX: Menggunakan paymentHandler
+		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook)
 	}
 
 	port := os.Getenv("PORT")

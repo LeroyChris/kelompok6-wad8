@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 var DB *pgxpool.Pool
 
 func InitDB() *pgxpool.Pool {
+	_ = godotenv.Load() // Muat .env jika ada
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Println("[WARN] DATABASE_URL tidak ditemukan di environment. Menggunakan fallback lokal.")

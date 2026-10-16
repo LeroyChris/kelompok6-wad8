@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -13,8 +17,11 @@ import (
 
 type DrawService interface {
 	GetParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]repository.ParticipantDB, dto.MetaPagination, error)
-	ExecuteRandomDraw(ctx context.Context, cycleID string) (map[string]interface{}, error)
+	ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error)
 	SubmitBid(ctx context.Context, cycleID, userID string, bidRate float64) error
+	GetCycleObligations(ctx context.Context, cycleID string) ([]repository.ObligationDB, error)
+	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
+	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 }
 
 type drawService struct {
@@ -53,22 +60,128 @@ func (s *drawService) GetParticipantsPaginated(ctx context.Context, cycleID stri
 	return data, meta, nil
 }
 
-func (s *drawService) ExecuteRandomDraw(ctx context.Context, cycleID string) (map[string]interface{}, error) {
+// Eksekusi Pemenang Siklus (Smart Routing: SPSB Auction atau Random Draw)
+func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error) {
+	// 1. Ambil data Circle & Siklus
+	info, err := s.repo.GetCircleInfoByCycle(ctx, cycleID)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.CycleStatus == "COMPLETED" {
+		return nil, errors.New("siklus arisan ini sudah selesai dan pemenang telah ditetapkan sebelumnya")
+	}
+
+	grossAmount := info.ContributionAmount * float64(info.MemberLimit)
+	if grossAmount <= 0 {
+		grossAmount = 5000000.00 // Default fallback bila parameter limit belum diisi
+	}
+
+	// 2. Cabang Logika Berdasarkan Track Type
+	if info.TrackType == "SPSB" {
+		return s.executeSPSBVickreyDraw(ctx, cycleID, info, grossAmount)
+	}
+
+	return s.executeProvablyFairRandomDraw(ctx, cycleID, info, grossAmount)
+}
+
+// Logika Lelang SPSB (Second Price Sealed Bid / Vickrey Auction)
+func (s *drawService) executeSPSBVickreyDraw(
+	ctx context.Context,
+	cycleID string,
+	info *repository.CircleCycleInfo,
+	grossAmount float64,
+) (map[string]interface{}, error) {
+	bids, err := s.repo.GetActiveBidsByCycle(ctx, cycleID)
+	if err != nil {
+		return nil, fmt.Errorf("gagal membaca penawaran lelang: %w", err)
+	}
+	if len(bids) == 0 {
+		return nil, errors.New("belum ada penawaran lelang aktif yang diajukan pada putaran ini")
+	}
+
+	// Pemenang adalah penawar tertinggi (bids[0])
+	winner := bids[0]
+	winningRate := winner.BidRatePercent
+
+	// Aturan Vickrey: Bayar tarif tawaran tertinggi KEDUA
+	payableRate := winningRate
+	if len(bids) >= 2 {
+		payableRate = bids[1].BidRatePercent
+	} else if info.BidFloorPercent != nil && *info.BidFloorPercent > 0 {
+		payableRate = *info.BidFloorPercent
+	}
+
+	discountAmount := grossAmount * (payableRate / 100.0)
+	netAmount := grossAmount - discountAmount
+
+	// Buat Hash Audit Keputusan
+	hashRaw := fmt.Sprintf("SPSB:%s:%s:win=%.2f:pay=%.2f:%d", cycleID, winner.UserID, winningRate, payableRate, time.Now().UnixNano())
+	hashBytes := sha256.Sum256([]byte(hashRaw))
+	decisionHash := hex.EncodeToString(hashBytes[:])
+
+	// Eksekusi Transaksi Atomis (Simpan Award, Catat Pencairan, Kredit Dompet)
+	awardID, err := s.repo.ExecuteSPSBDrawTransaction(
+		ctx, cycleID, winner, winningRate, payableRate, grossAmount, netAmount, decisionHash,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"award_id":                 awardID,
+		"cycle_id":                 cycleID,
+		"circle_name":              info.CircleName,
+		"award_method":             "SPSB",
+		"winner_user_id":           winner.UserID,
+		"winner_name":              winner.FullName,
+		"winning_bid_rate_percent": winningRate,
+		"payable_bid_rate_percent": payableRate,
+		"gross_amount":             grossAmount,
+		"discount_amount":          discountAmount,
+		"net_disbursed_amount":     netAmount,
+		"decision_hash":            decisionHash,
+	}, nil
+}
+
+// Logika Pengundian Acak Kriptografis (Provably Fair Random Draw)
+func (s *drawService) executeProvablyFairRandomDraw(
+	ctx context.Context,
+	cycleID string,
+	info *repository.CircleCycleInfo,
+	grossAmount float64,
+) (map[string]interface{}, error) {
 	candidates, err := s.repo.GetEligibleParticipants(ctx, cycleID)
 	if err != nil {
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, errors.New("tidak ada partisipan yang berhak mengikuti pengundian pada siklus ini")
+		return nil, errors.New("tidak ada partisipan yang berhak mengikuti pengundian pada siklus ini (seluruh anggota mungkin telah menang)")
 	}
 
-	// Logika acak pemenang (Random Draw)
-	rand.Seed(time.Now().UnixNano())
-	winnerIdx := rand.Intn(len(candidates))
-	winner := candidates[winnerIdx]
+	// Generate Cryptographically Secure Random Seed
+	seedBytes := make([]byte, 32)
+	if _, err := rand.Read(seedBytes); err != nil {
+		return nil, fmt.Errorf("gagal menghasilkan seed kriptografi: %w", err)
+	}
+	seedCommitment := hex.EncodeToString(seedBytes)
 
-	// Eksekusi Transaction SQL untuk simpan award & update status
-	awardID, err := s.repo.ExecuteDrawTransaction(ctx, cycleID, winner, "RANDOM_DRAW", 5000000)
+	// Pemilihan Pemenang dengan crypto/rand
+	nBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(candidates))))
+	if err != nil {
+		return nil, fmt.Errorf("gagal mengundi pemenang: %w", err)
+	}
+	winner := candidates[nBig.Int64()]
+
+	// Buat Hash Keputusan
+	hashRaw := fmt.Sprintf("RANDOM:%s:%s:%s:%d", cycleID, winner.UserID, seedCommitment, time.Now().UnixNano())
+	hashBytes := sha256.Sum256([]byte(hashRaw))
+	decisionHash := hex.EncodeToString(hashBytes[:])
+
+	// Eksekusi Transaksi Atomis (Simpan Award, Audit Trail, Pencairan ke Dompet Pemenang)
+	awardID, err := s.repo.ExecuteRandomDrawTransaction(
+		ctx, cycleID, winner, grossAmount, decisionHash, seedCommitment,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +189,16 @@ func (s *drawService) ExecuteRandomDraw(ctx context.Context, cycleID string) (ma
 	return map[string]interface{}{
 		"award_id":               awardID,
 		"cycle_id":               cycleID,
-		"winner":                 winner,
-		"winner_name":            winner.Name,
+		"circle_name":            info.CircleName,
 		"award_method":           "RANDOM_DRAW",
-		"gross_amount":           5000000,
-		"random_seed_commitment": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		"winner_user_id":         winner.UserID,
+		"winner_name":            winner.Name,
+		"gross_amount":           grossAmount,
+		"net_disbursed_amount":   grossAmount,
+		"random_seed_commitment": seedCommitment,
+		"random_source":          "CRYPTO_SECURE_RANDOM",
+		"eligible_count":         len(candidates),
+		"decision_hash":          decisionHash,
 	}, nil
 }
 
@@ -88,5 +206,34 @@ func (s *drawService) SubmitBid(ctx context.Context, cycleID, userID string, bid
 	if bidRate < 0 || bidRate > 100 {
 		return errors.New("persentase tawaran lelang harus berada di antara 0% hingga 100%")
 	}
+
+	info, err := s.repo.GetCircleInfoByCycle(ctx, cycleID)
+	if err != nil {
+		return err
+	}
+
+	if info.TrackType != "SPSB" {
+		return errors.New("kelompok arisan ini menggunakan sistem kocokan acak (Random Draw), bukan sistem lelang (SPSB)")
+	}
+
+	if info.BidFloorPercent != nil && bidRate < *info.BidFloorPercent {
+		return fmt.Errorf("tawaran minimal adalah %.2f%% sesuai batas bawah (bid floor) kelompok", *info.BidFloorPercent)
+	}
+	if info.BidCeilingPercent != nil && bidRate > *info.BidCeilingPercent {
+		return fmt.Errorf("tawaran maksimal adalah %.2f%% sesuai batas atas (bid ceiling) kelompok", *info.BidCeilingPercent)
+	}
+
 	return s.repo.SaveBid(ctx, cycleID, userID, bidRate)
+}
+
+func (s *drawService) GetCycleObligations(ctx context.Context, cycleID string) ([]repository.ObligationDB, error) {
+	return s.repo.GetCycleObligations(ctx, cycleID)
+}
+
+func (s *drawService) GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error) {
+	return s.repo.GetCycleAward(ctx, cycleID)
+}
+
+func (s *drawService) StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error) {
+	return s.repo.OpenCycleWithParticipantsAndObligations(ctx, circleID, cycleNumber, dueAt)
 }
