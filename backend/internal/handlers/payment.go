@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -34,7 +35,7 @@ type ReviewProofInput struct {
 }
 
 type VerifyPaymentInput struct {
-	Status string `json:"status" binding:"required"` // verified, rejected
+	Status string `json:"status" binding:"required"`
 }
 
 func normalizeObligationID(id string) string {
@@ -54,7 +55,10 @@ func normalizeObligationID(id string) string {
 
 // POST /api/v1/obligations/:id/pay
 func (h *PaymentHandler) PayObligation(c *gin.Context) {
-	userID := c.GetString("userID")
+	userID := c.GetString("user_id")
+	if userID == "" {
+		userID = c.GetString("userID")
+	}
 	if userID == "" {
 		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
 		return
@@ -191,11 +195,11 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 		}
 
 		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pembayaran iuran berhasil diproses via dompet internal", gin.H{
-			"payment_order_id": paymentOrderID,
-			"obligation_id":    obligationID,
-			"amount_paid":      obligationAmount,
-			"payment_method":   "WALLET",
-			"payment_status":   "PAID",
+			"payment_order_id":  paymentOrderID,
+			"obligation_id":     obligationID,
+			"amount_paid":       obligationAmount,
+			"payment_method":    "WALLET",
+			"payment_status":    "PAID",
 			"remaining_balance": currentBalance - obligationAmount,
 		}))
 		return
@@ -247,7 +251,10 @@ func (h *PaymentHandler) GetPaymentDetail(c *gin.Context) {
 
 // POST /api/v1/payments/:id/proof
 func (h *PaymentHandler) UploadPaymentProof(c *gin.Context) {
-	userID := c.GetString("userID")
+	userID := c.GetString("user_id")
+	if userID == "" {
+		userID = c.GetString("userID")
+	}
 	id := c.Param("id")
 
 	var input struct {
@@ -283,8 +290,11 @@ func (h *PaymentHandler) UploadPaymentProof(c *gin.Context) {
 
 // POST /api/v1/payment-proofs/:id/review
 func (h *PaymentHandler) ReviewPaymentProof(c *gin.Context) {
-	reviewerID := c.GetString("userID")
-	id := c.Param("id")
+	proofID := c.Param("id")
+	reviewerID := c.GetString("user_id")
+	if reviewerID == "" {
+		reviewerID = c.GetString("userID")
+	}
 
 	var input ReviewProofInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -292,12 +302,57 @@ func (h *PaymentHandler) ReviewPaymentProof(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
+
+	if input.ReviewStatus == "APPROVED" {
+		tx, err := h.DB.Begin(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memulai transaksi", nil))
+			return
+		}
+		defer tx.Rollback(ctx)
+
+		// 1. Ambil data obligation dan user_id dari bukti transfer
+		var obligationID, userID string
+		var amount float64
+		getPaymentInfoSql := `
+			SELECT co.obligation_id, cm.user_id, co.amount_due
+			FROM payment_proofs pp
+			JOIN payment_orders po ON pp.payment_order_id = po.payment_order_id
+			JOIN obligation_payment_orders opo ON po.payment_order_id = opo.payment_order_id
+			JOIN cycle_obligations co ON opo.obligation_id = co.obligation_id
+			JOIN cycle_participants cp ON co.cycle_participant_id = cp.cycle_participant_id
+			JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
+			WHERE pp.payment_proof_id = $1;
+		`
+		err = tx.QueryRow(ctx, getPaymentInfoSql, proofID).Scan(&obligationID, &userID, &amount)
+		if err == nil {
+			// 2. Set Status Obligation -> PAID
+			_, _ = tx.Exec(ctx, `UPDATE cycle_obligations SET obligation_status = 'PAID' WHERE obligation_id = $1;`, obligationID)
+
+			// 3. Potong/Update Saldo di user_wallets
+			var walletID string
+			_ = tx.QueryRow(ctx, `UPDATE user_wallets SET balance = balance - $1, updated_at = NOW() WHERE user_id = $2 RETURNING wallet_id::text;`, amount, userID).Scan(&walletID)
+
+			// 4. Catat Transaksi Mutasi
+			if walletID != "" {
+				desc := fmt.Sprintf("Pembayaran iuran arisan #%s", obligationID)
+				_, _ = tx.Exec(ctx, `INSERT INTO wallet_transactions (wallet_id, amount, tx_type, description) VALUES ($1, $2, 'OBLIGATION_PAYMENT', $3);`, walletID, amount, desc)
+			}
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memproses persetujuan pembayaran", nil))
+			return
+		}
+	}
+
 	query := `
 		UPDATE payment_proofs
 		SET review_status = $1, review_note = $2, reviewed_by_user_id = $3, reviewed_at = NOW()
 		WHERE payment_proof_id = $4;
 	`
-	res, err := h.DB.Exec(c.Request.Context(), query, input.ReviewStatus, input.ReviewNote, reviewerID, id)
+	res, err := h.DB.Exec(ctx, query, input.ReviewStatus, input.ReviewNote, reviewerID, proofID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menyimpan review bukti bayar: "+err.Error(), nil))
 		return
@@ -307,10 +362,9 @@ func (h *PaymentHandler) ReviewPaymentProof(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Review bukti bayar disimpan", gin.H{
-		"payment_proof_id": id,
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Review bukti bayar berhasil disimpan", gin.H{
+		"payment_proof_id": proofID,
 		"review_status":    input.ReviewStatus,
-		"review_note":      input.ReviewNote,
 	}))
 }
 

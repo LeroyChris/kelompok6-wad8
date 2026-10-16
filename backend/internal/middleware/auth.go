@@ -9,8 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// AuthMiddleware memverifikasi JWT Bearer token dari header Authorization
-// Pegangan: Anggota 1 (Auth & Security)
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -50,8 +48,13 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("userID", claims["user_id"])
-			c.Set("email", claims["email"])
+			if userID, exists := claims["user_id"]; exists {
+				c.Set("userID", userID)
+				c.Set("user_id", userID)
+			}
+			if email, exists := claims["email"]; exists {
+				c.Set("email", email)
+			}
 			if role, exists := claims["role"]; exists {
 				c.Set("role", role)
 			} else {
@@ -63,7 +66,6 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// RequireRole adalah middleware RBAC (Role-Based Access Control)
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("role")

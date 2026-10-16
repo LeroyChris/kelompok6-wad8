@@ -29,17 +29,18 @@ func main() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
 
-	// Inisialisasi Layer Repository -> Service -> Handler Instances
+	// Inisialisasi Layer Repositories & Services
+	drawRepo := repository.NewDrawRepository(db)
+	drawService := service.NewDrawService(drawRepo)
+
+	// Inisialisasi Layer Handlers
 	authHandler := handlers.NewAuthHandler(db)
 	userHandler := handlers.NewUserHandler(db)
 	walletHandler := handlers.NewWalletHandler(db)
 	bankHandler := handlers.NewBankAccountHandler(db)
-	paymentHandler := handlers.NewPaymentHandler(db)
-
-	// Inisialisasi Module Draw & Cycle (Real Database Supabase)
-	drawRepo := repository.NewDrawRepository(db)
-	drawService := service.NewDrawService(drawRepo)
+	circleHandler := handlers.NewCircleHandler(db)
 	drawHandler := handlers.NewDrawHandler(drawService)
+	paymentHandler := handlers.NewPaymentHandler(db)
 
 	healthHandler := func(c *gin.Context) {
 		dbStatus := "disconnected"
@@ -58,18 +59,14 @@ func main() {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", healthHandler)
-		// -------------------------------------------------------------
-		// Modul 2.1: Autentikasi & Identitas Pengguna (Track 1)
-		// -------------------------------------------------------------
+
+		// Autentikasi & Identitas
 		auth := v1.Group("/auth")
 		{
 			auth.POST("/otp/request", authHandler.RequestOTP)
 			auth.POST("/otp/verify", authHandler.VerifyOTP)
 			auth.POST("/request-otp", authHandler.RequestOTP)
 			auth.POST("/verify-otp", authHandler.VerifyOTP)
-			auth.POST("/google", authHandler.GoogleAuth)
-			auth.POST("/register", authHandler.Register)
-			auth.POST("/login", authHandler.Login)
 		}
 
 		users := v1.Group("/users")
@@ -77,17 +74,10 @@ func main() {
 		{
 			users.GET("/me", userHandler.GetUserProfile)
 			users.PATCH("/me", userHandler.UpdateProfile)
-			users.GET("/me/win-history", userHandler.GetWinHistory)
 			users.GET("/me/reputation", userHandler.GetUserReputation)
-
-			// Legacy alias
-			users.GET("/profile", userHandler.GetUserProfile)
-			users.PUT("/profile", userHandler.UpdateProfile)
 		}
 
-		// -------------------------------------------------------------
-		// Modul In-App Wallet (Track 1)
-		// -------------------------------------------------------------
+		// In-App Wallet
 		wallet := v1.Group("/wallet")
 		wallet.Use(middleware.AuthMiddleware())
 		{
@@ -96,9 +86,7 @@ func main() {
 			wallet.POST("/topup", walletHandler.TopUpWallet)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.2: Rekening Bank & Validasi (Track 1)
-		// -------------------------------------------------------------
+		// Rekening Bank
 		bankAccounts := v1.Group("/bank-accounts")
 		bankAccounts.Use(middleware.AuthMiddleware())
 		{
@@ -107,47 +95,38 @@ func main() {
 			bankAccounts.DELETE("/:id", bankHandler.DeleteBankAccount)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.3: Manajemen Circle & Keanggotaan (Track 2)
-		// -------------------------------------------------------------
+		// Manajemen Circle
 		circles := v1.Group("/circles")
 		circles.Use(middleware.AuthMiddleware())
 		{
-			circles.POST("", handlers.CreateCircle)
-			circles.POST("/join", handlers.JoinCircle)
-			circles.GET("", handlers.GetCircles)
-			circles.GET("/:id", handlers.GetCircleDetail)
-			circles.POST("/:id/lock", handlers.LockCircle)
-			circles.POST("/:id/invitations", handlers.CreateInvitation)
-			circles.GET("/:id/members", handlers.GetCircleMembers)
+			circles.POST("", circleHandler.CreateCircle)
+			circles.POST("/join", circleHandler.JoinCircle)
+			circles.GET("", circleHandler.GetCircles)
+			circles.GET("/:id", circleHandler.GetCircleDetail)
+			circles.POST("/:id/lock", circleHandler.LockCircle)
+			circles.POST("/:id/invitations", circleHandler.CreateInvitation)
+			circles.GET("/:id/members", circleHandler.GetCircleMembers)
 
-			// Relasi Siklus per Circle
+			// Relasi Siklus
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
 			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)
-
-			// Legacy spin & bids di circle level
-			circles.POST("/:id/bids", handlers.SubmitBid)
-			circles.POST("/:id/spin", handlers.SpinWheel)
 		}
 
 		invitations := v1.Group("/invitations")
 		invitations.Use(middleware.AuthMiddleware())
 		{
-			invitations.POST("/join", handlers.JoinCircle)
+			invitations.POST("/join", circleHandler.JoinCircle)
 		}
 
-		// Legacy alias /groups untuk frontend
 		groups := v1.Group("/groups")
 		groups.Use(middleware.AuthMiddleware())
 		{
-			groups.POST("", handlers.CreateGroup)
-			groups.GET("/:id", handlers.GetGroupDetail)
-			groups.POST("/:id/join", handlers.JoinGroup)
+			groups.POST("", circleHandler.CreateGroup)
+			groups.GET("/:id", circleHandler.GetGroupDetail)
+			groups.POST("/:id/join", circleHandler.JoinGroup)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.4 & 2.5: Siklus Arisan, Partisipan & Mesin Lelang/Kocok (Track 3)
-		// -------------------------------------------------------------
+		// Siklus & Mesin Lelang/Kocok
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
 		{
@@ -159,16 +138,13 @@ func main() {
 			cycles.GET("/:id/award", drawHandler.GetCycleAward)
 		}
 
-		// Legacy alias /draws
 		draws := v1.Group("/draws")
 		draws.Use(middleware.AuthMiddleware())
 		{
 			draws.GET("/group/:id", drawHandler.GetGroupDraws)
 		}
 
-		// -------------------------------------------------------------
-		// Modul 2.6: Pembayaran Tagihan & Bukti Transaksi (Track 3)
-		// -------------------------------------------------------------
+		// Pembayaran & Tagihan
 		obligations := v1.Group("/obligations")
 		obligations.Use(middleware.AuthMiddleware())
 		{
@@ -180,8 +156,6 @@ func main() {
 		{
 			payments.GET("/:id", paymentHandler.GetPaymentDetail)
 			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof)
-
-			// Legacy aliases
 			payments.POST("", paymentHandler.SubmitPayment)
 			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
 			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)

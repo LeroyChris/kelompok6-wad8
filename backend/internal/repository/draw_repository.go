@@ -48,17 +48,17 @@ type ObligationDB struct {
 }
 
 type AwardDB struct {
-	AwardID        string     `json:"award_id"`
-	CycleID        string     `json:"cycle_id"`
-	ParticipantID  string     `json:"participant_id"`
-	WinnerUserID   string     `json:"winner_user_id"`
-	WinnerName     string     `json:"winner_name"`
-	AwardMethod    string     `json:"award_method"`
-	GrossAmount    float64    `json:"gross_amount"`
-	WinningBidRate *float64   `json:"winning_bid_rate_percent,omitempty"`
-	PayableBidRate *float64   `json:"payable_bid_rate_percent,omitempty"`
-	DecisionHash   string     `json:"decision_hash"`
-	DecidedAt      time.Time  `json:"decided_at"`
+	AwardID        string    `json:"award_id"`
+	CycleID        string    `json:"cycle_id"`
+	ParticipantID  string    `json:"participant_id"`
+	WinnerUserID   string    `json:"winner_user_id"`
+	WinnerName     string    `json:"winner_name"`
+	AwardMethod    string    `json:"award_method"`
+	GrossAmount    float64   `json:"gross_amount"`
+	WinningBidRate *float64  `json:"winning_bid_rate_percent,omitempty"`
+	PayableBidRate *float64  `json:"payable_bid_rate_percent,omitempty"`
+	DecisionHash   string    `json:"decision_hash"`
+	DecidedAt      time.Time `json:"decided_at"`
 }
 
 type DrawRepository interface {
@@ -82,7 +82,6 @@ func NewDrawRepository(db *pgxpool.Pool) DrawRepository {
 	return &drawRepo{db: db}
 }
 
-// 1. Get Participants dengan Pagination
 func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error) {
 	offset := (page - 1) * pageSize
 
@@ -131,7 +130,6 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	return list, total, nil
 }
 
-// 2. Ambil Partisipan ELIGIBLE yang Belum Pernah Menang di Circle ini
 func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error) {
 	query := `
 		SELECT
@@ -178,7 +176,6 @@ func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) 
 	return list, nil
 }
 
-// 3. Ambil Metadata Circle & Cycle
 func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error) {
 	query := `
 		SELECT
@@ -216,9 +213,7 @@ func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*C
 	return &info, nil
 }
 
-// 4. Submit / Upsert Bid Lelang SPSB (Track A)
 func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error {
-	// Temukan cycle_participant_id
 	findParticipantQuery := `
 		SELECT cp.cycle_participant_id
 		FROM cycle_participants cp
@@ -234,7 +229,6 @@ func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate 
 		return fmt.Errorf("failed to lookup participant: %w", err)
 	}
 
-	// Upsert ke tabel bids (Query 3.5 SSOT)
 	query := `
 		INSERT INTO bids (cycle_participant_id, bid_rate_percent, bid_status, submitted_at)
 		VALUES ($1, $2, 'ACTIVE', NOW())
@@ -248,7 +242,6 @@ func (r *drawRepo) SaveBid(ctx context.Context, cycleID, userID string, bidRate 
 	return nil
 }
 
-// 5. Ambil Tawaran Lelang Terurut Tertinggi (Query 3.6 SSOT)
 func (r *drawRepo) GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error) {
 	query := `
 		SELECT
@@ -281,7 +274,6 @@ func (r *drawRepo) GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]
 	return bids, nil
 }
 
-// 6. Eksekusi Lelang SPSB Vickrey (Atomis ACID + Auto-Disbursement)
 func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	ctx context.Context,
 	cycleID string,
@@ -295,7 +287,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	}
 	defer tx.Rollback(ctx)
 
-	// A. Insert cycle_awards (Query 3.7 SSOT)
 	var awardID string
 	insertAwardQuery := `
 		INSERT INTO cycle_awards (
@@ -310,7 +301,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to insert cycle award: %w", err)
 	}
 
-	// B. Insert disbursements (Catat pencairan dana otomatis)
 	insertDisbursementQuery := `
 		INSERT INTO disbursements (
 			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
@@ -321,7 +311,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to record disbursement: %w", err)
 	}
 
-	// C. Kredit Saldo Dompet Pemenang (Query 3.8 SSOT)
 	updateWalletQuery := `
 		UPDATE user_wallets
 		SET balance = balance + $1, updated_at = NOW()
@@ -331,7 +320,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to credit winner wallet: %w", err)
 	}
 
-	// D. Catat mutasi ledger di wallet_transactions
 	insertTxQuery := `
 		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description, created_at)
 		SELECT wallet_id, $1, 'DISBURSEMENT', $2, 'Pemenang Arisan Lelang SPSB (Vickrey)', NOW()
@@ -341,7 +329,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to record ledger transaction: %w", err)
 	}
 
-	// E. Perbarui status siklus menjadi COMPLETED
 	updateCycleQuery := `
 		UPDATE arisan_cycles
 		SET cycle_status = 'COMPLETED'
@@ -358,7 +345,6 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	return awardID, nil
 }
 
-// 7. Eksekusi Kocokan Acak (RANDOM_DRAW) Provably Fair (Atomis ACID + Auto-Disbursement)
 func (r *drawRepo) ExecuteRandomDrawTransaction(
 	ctx context.Context,
 	cycleID string,
@@ -372,7 +358,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 	}
 	defer tx.Rollback(ctx)
 
-	// A. Insert cycle_awards (Query 3.7 SSOT)
 	var awardID string
 	insertAwardQuery := `
 		INSERT INTO cycle_awards (
@@ -387,7 +372,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to insert cycle award: %w", err)
 	}
 
-	// B. Insert draw_results (Provably Fair Audit Trail)
 	insertDrawResultQuery := `
 		INSERT INTO draw_results (
 			award_id, random_seed_commitment, random_source, participant_count, drawn_at
@@ -398,7 +382,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to record draw result audit: %w", err)
 	}
 
-	// C. Insert disbursements
 	insertDisbursementQuery := `
 		INSERT INTO disbursements (
 			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
@@ -409,7 +392,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to record disbursement: %w", err)
 	}
 
-	// D. Kredit Saldo Dompet Pemenang (Query 3.8 SSOT)
 	updateWalletQuery := `
 		UPDATE user_wallets
 		SET balance = balance + $1, updated_at = NOW()
@@ -419,7 +401,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to credit winner wallet: %w", err)
 	}
 
-	// E. Catat mutasi ledger di wallet_transactions
 	insertTxQuery := `
 		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description, created_at)
 		SELECT wallet_id, $1, 'DISBURSEMENT', $2, 'Pemenang Kocokan Arisan Acak (Random Draw)', NOW()
@@ -429,7 +410,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to record ledger transaction: %w", err)
 	}
 
-	// F. Perbarui status siklus menjadi COMPLETED
 	updateCycleQuery := `
 		UPDATE arisan_cycles
 		SET cycle_status = 'COMPLETED'
@@ -446,7 +426,6 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 	return awardID, nil
 }
 
-// 8. Ambil Tagihan Iuran Siklus dari Database
 func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error) {
 	query := `
 		SELECT
@@ -481,7 +460,6 @@ func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]O
 	return list, nil
 }
 
-// 9. Ambil Pemenang Siklus dari Database (cycle_awards)
 func (r *drawRepo) GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error) {
 	query := `
 		SELECT
@@ -518,14 +496,13 @@ func (r *drawRepo) GetCycleAward(ctx context.Context, cycleID string) (*AwardDB,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // Belum ada award untuk siklus ini
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get award: %w", err)
 	}
 	return &a, nil
 }
 
-// 10. Buka Siklus Baru, Snapshot Member jadi Peserta, & Terbitkan Tagihan Iuran (Query 3.1, 3.2, 3.3 SSOT)
 func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -533,7 +510,6 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 	}
 	defer tx.Rollback(ctx)
 
-	// A. Buat arisan_cycle baru
 	var cycleID string
 	insertCycleQuery := `
 		INSERT INTO arisan_cycles (circle_id, cycle_number, cycle_status, due_at)
@@ -545,7 +521,6 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 		return "", fmt.Errorf("failed to create cycle: %w", err)
 	}
 
-	// B. Snapshot circle members jadi cycle_participants
 	insertParticipantsQuery := `
 		INSERT INTO cycle_participants (cycle_id, circle_membership_id, participation_status)
 		SELECT $1, cm.circle_membership_id, 'ELIGIBLE'
@@ -557,7 +532,6 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 		return "", fmt.Errorf("failed to populate cycle participants: %w", err)
 	}
 
-	// C. Auto-generate cycle_obligations
 	insertObligationsQuery := `
 		INSERT INTO cycle_obligations (cycle_participant_id, amount_due, due_at, obligation_status)
 		SELECT cp.cycle_participant_id, c.contribution_amount, $2, 'UNPAID'

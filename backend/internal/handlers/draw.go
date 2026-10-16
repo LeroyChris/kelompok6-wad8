@@ -41,10 +41,8 @@ func normalizeCycleID(id string) string {
 	}
 }
 
-// GET /api/v1/cycles/:id/participants?page=1&page_size=10
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
-
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
@@ -57,7 +55,6 @@ func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildPaginatedResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus "+cycleID, participants, meta))
 }
 
-// POST /api/v1/cycles/:id/draw (Eksekusi Pemenang: SPSB Vickrey atau Random Draw)
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 
@@ -70,7 +67,6 @@ func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang putaran arisan berhasil ditetapkan dan dana dicairkan", result))
 }
 
-// POST /api/v1/cycles/:id/bids (Track A Lelang SPSB)
 func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 	userID := c.GetString("userID")
@@ -96,7 +92,6 @@ func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	}))
 }
 
-// POST /api/v1/circles/:id/cycles (Buka siklus baru, snapshot member, & terbitkan tagihan)
 func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 	circleID := c.Param("id")
 
@@ -106,7 +101,7 @@ func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 		return
 	}
 
-	dueAt := time.Now().AddDate(0, 1, 0) // Default 30 hari
+	dueAt := time.Now().AddDate(0, 1, 0)
 	if input.DueAt != "" {
 		if parsed, err := time.Parse(time.RFC3339, input.DueAt); err == nil {
 			dueAt = parsed
@@ -128,7 +123,6 @@ func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 	}))
 }
 
-// GET /api/v1/circles/:id/cycles
 func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 	circleID := c.Param("id")
 	cycles := []gin.H{
@@ -137,31 +131,20 @@ func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 			"circle_id":    circleID,
 			"cycle_number": 1,
 			"cycle_status": "COMPLETED",
-			"due_at":       "2026-08-01T00:00:00Z",
-		},
-		{
-			"cycle_id":     "cyc-uuid-002",
-			"circle_id":    circleID,
-			"cycle_number": 2,
-			"cycle_status": "PAYMENT_COLLECTION",
-			"due_at":       "2026-09-01T00:00:00Z",
 		},
 	}
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil siklus arisan", cycles))
 }
 
-// GET /api/v1/cycles/:id
 func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", gin.H{
 		"cycle_id":     cycleID,
-		"cycle_number": 2,
+		"cycle_number": 1,
 		"cycle_status": "PAYMENT_COLLECTION",
-		"due_at":       "2026-09-01T00:00:00Z",
 	}))
 }
 
-// GET /api/v1/cycles/:id/obligations (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID)
@@ -173,7 +156,6 @@ func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", obligations))
 }
 
-// GET /api/v1/cycles/:id/award (Query real data dari Supabase)
 func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 	award, err := h.drawService.GetCycleAward(c.Request.Context(), cycleID)
@@ -189,20 +171,11 @@ func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Data pemenang putaran arisan", award))
 }
 
-// GET /api/v1/draws/group/:id (Legacy alias)
 func (h *DrawHandler) GetGroupDraws(c *gin.Context) {
 	groupID := c.Param("id")
 	c.JSON(http.StatusOK, gin.H{
 		"status":   "success",
 		"group_id": groupID,
-		"data": []gin.H{
-			{
-				"draw_id":       "draw-uuid-901",
-				"period_number": 1,
-				"winner_name":   "Roy",
-				"total_won":     5000000,
-				"draw_date":     "2026-08-01T10:00:00Z",
-			},
-		},
+		"data":     []gin.H{},
 	})
 }
