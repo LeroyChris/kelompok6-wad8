@@ -104,10 +104,11 @@ func main() {
 			circles.POST("", circleHandler.CreateCircle)
 			circles.POST("/join", circleHandler.JoinCircle)
 			circles.GET("", circleHandler.GetCircles)
-			circles.GET("/:id", circleHandler.GetCircleDetail)
-			circles.POST("/:id/lock", circleHandler.LockCircle)
-			circles.POST("/:id/invitations", circleHandler.CreateInvitation)
-			circles.GET("/:id/members", circleHandler.GetCircleMembers)
+			circles.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleDetail)
+			circles.POST("/:id/lock", middleware.RequireCircleRole(db, "OWNER"), circleHandler.LockCircle)
+			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
+			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
+			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 
 			// Relasi Siklus
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
@@ -124,7 +125,7 @@ func main() {
 		groups.Use(middleware.AuthMiddleware())
 		{
 			groups.POST("", circleHandler.CreateGroup)
-			groups.GET("/:id", circleHandler.GetGroupDetail)
+			groups.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetGroupDetail)
 			groups.POST("/:id/join", circleHandler.JoinGroup)
 		}
 
