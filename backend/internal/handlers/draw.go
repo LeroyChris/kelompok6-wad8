@@ -134,24 +134,26 @@ func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 
 func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 	circleID := c.Param("id")
-	cycles := []gin.H{
-		{
-			"cycle_id":     "cyc-uuid-001",
-			"circle_id":    circleID,
-			"cycle_number": 1,
-			"cycle_status": "COMPLETED",
-		},
+	cycles, err := h.drawService.GetCyclesByCircle(c.Request.Context(), circleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil siklus", nil))
+		return
 	}
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil siklus arisan", cycles))
 }
 
 func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", gin.H{
-		"cycle_id":     cycleID,
-		"cycle_number": 1,
-		"cycle_status": "PAYMENT_COLLECTION",
-	}))
+	cycle, err := h.drawService.GetCycle(c.Request.Context(), cycleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil siklus", nil))
+		return
+	}
+	if cycle == nil {
+		c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Siklus tidak ditemukan", nil))
+		return
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", cycle))
 }
 
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {

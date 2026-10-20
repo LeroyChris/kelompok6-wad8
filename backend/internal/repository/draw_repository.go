@@ -61,6 +61,16 @@ type AwardDB struct {
 	DecidedAt      time.Time `json:"decided_at"`
 }
 
+type CycleDB struct {
+	CycleID        string     `json:"cycle_id"`
+	CircleID       string     `json:"circle_id"`
+	CycleNumber    int        `json:"cycle_number"`
+	CycleStatus    string     `json:"cycle_status"`
+	DueAt          time.Time  `json:"due_at"`
+	BiddingOpenAt  *time.Time `json:"bidding_open_at,omitempty"`
+	BiddingCloseAt *time.Time `json:"bidding_close_at,omitempty"`
+}
+
 type DrawRepository interface {
 	GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error)
 	GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error)
@@ -74,6 +84,8 @@ type DrawRepository interface {
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
 	CloseBidding(ctx context.Context, cycleID string) error
+	GetCyclesByCircle(ctx context.Context, circleID string) ([]CycleDB, error)
+	GetCycle(ctx context.Context, cycleID string) (*CycleDB, error)
 }
 
 type drawRepo struct {
@@ -451,6 +463,35 @@ func (r *drawRepo) CloseBidding(ctx context.Context, cycleID string) error {
 		return errors.New("bidding belum dapat ditutup atau siklus tidak ditemukan")
 	}
 	return nil
+}
+
+func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string) ([]CycleDB, error) {
+	rows, err := r.db.Query(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE circle_id=$1 ORDER BY cycle_number DESC`, circleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]CycleDB, 0)
+	for rows.Next() {
+		var item CycleDB
+		if err := rows.Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *drawRepo) GetCycle(ctx context.Context, cycleID string) (*CycleDB, error) {
+	var item CycleDB
+	err := r.db.QueryRow(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE cycle_id=$1`, cycleID).Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error) {
