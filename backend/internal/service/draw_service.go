@@ -25,6 +25,7 @@ type DrawService interface {
 	CloseBidding(ctx context.Context, cycleID string) error
 	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]repository.CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error)
+	GetUserBid(ctx context.Context, cycleID, userID string) (*repository.BidEntry, error)
 	GetDrawProof(ctx context.Context, cycleID string) (*repository.DrawProofDB, error)
 }
 
@@ -259,6 +260,9 @@ func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string, li
 }
 func (s *drawService) GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error) {
 	return s.repo.GetCycle(ctx, cycleID)
+}
+func (s *drawService) GetUserBid(ctx context.Context, cycleID, userID string) (*repository.BidEntry, error) {
+	return s.repo.GetUserBid(ctx, cycleID, userID)
 }
 
 func (s *drawService) GetDrawProof(ctx context.Context, cycleID string) (*repository.DrawProofDB, error) {
