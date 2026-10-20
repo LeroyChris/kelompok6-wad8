@@ -260,23 +260,42 @@ func (h *CircleHandler) CreateInvitation(c *gin.Context) {
 }
 
 func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
-	rows, err := h.DB.Query(c.Request.Context(), `SELECT cm.circle_membership_id::text,u.user_id::text,u.full_name,cm.membership_role,cm.membership_status,cm.joined_at FROM circle_memberships cm JOIN users u ON u.user_id=cm.user_id WHERE cm.circle_id=$1 ORDER BY cm.joined_at ASC NULLS LAST,cm.circle_membership_id ASC LIMIT $2`, c.Param("id"), circleLimit(c))
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(400, dto.BuildResponse(400, "error", "cursor tidak valid", nil))
+		return
+	}
+	rows, err := h.DB.Query(c.Request.Context(), `
+		SELECT cm.circle_membership_id::text,u.user_id::text,u.full_name,cm.membership_role,cm.membership_status,cm.joined_at,cm.created_at
+		FROM circle_memberships cm JOIN users u ON u.user_id=cm.user_id
+		WHERE cm.circle_id=$1
+		  AND ($2::timestamptz IS NULL OR (cm.created_at,cm.circle_membership_id) > ($2::timestamptz,$3::uuid))
+		ORDER BY cm.created_at ASC,cm.circle_membership_id ASC LIMIT $4`, c.Param("id"), cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(500, dto.BuildResponse(500, "error", "Gagal mengambil anggota", nil))
 		return
 	}
 	defer rows.Close()
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	created := make([]time.Time, 0, limit+1)
 	for rows.Next() {
 		var mid, uid, name, role, status string
 		var joined *time.Time
-		if err := rows.Scan(&mid, &uid, &name, &role, &status, &joined); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&mid, &uid, &name, &role, &status, &joined, &createdAt); err != nil {
 			c.JSON(500, dto.BuildResponse(500, "error", "Data anggota tidak valid", nil))
 			return
 		}
 		items = append(items, gin.H{"circle_membership_id": mid, "user_id": uid, "full_name": name, "membership_role": role, "membership_status": status, "joined_at": joined})
+		created = append(created, createdAt)
 	}
-	c.JSON(200, dto.BuildResponse(200, "success", "Daftar anggota berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": circleLimit(c), "next_cursor": nil}}))
+	var nextCursor any
+	if len(items) > limit {
+		nextCursor = encodeWalletCursor(created[limit-1], items[limit-1]["circle_membership_id"].(string))
+		items = items[:limit]
+	}
+	c.JSON(200, dto.BuildResponse(200, "success", "Daftar anggota berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
 
 func (h *CircleHandler) LockCircle(c *gin.Context) {
