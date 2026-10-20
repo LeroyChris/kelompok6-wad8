@@ -92,6 +92,7 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 
 	// 1. Ambil detail obligation dari Supabase
 	var obligationAmount float64
@@ -113,11 +114,6 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 		return
 	}
 
-	if currentStatus == "PAID" {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Tagihan iuran ini sudah lunas", nil))
-		return
-	}
-
 	// 2. Transaksi ACID: Bayar dengan Saldo In-App Wallet
 	if method == "WALLET" {
 		tx, err := h.DB.Begin(ctx)
@@ -126,6 +122,33 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 			return
 		}
 		defer tx.Rollback(ctx)
+
+		// Lock and re-check the obligation inside the transaction. This prevents
+		// concurrent requests from charging the same obligation twice.
+		err = tx.QueryRow(ctx, `
+			SELECT co.amount_due, co.obligation_status
+			FROM cycle_obligations co
+			JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
+			JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
+			WHERE co.obligation_id = $1 AND cm.user_id = $2
+			FOR UPDATE OF co`, obligationID, userID).Scan(&obligationAmount, &currentStatus)
+		if err != nil {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Tagihan iuran tidak ditemukan", nil))
+			return
+		}
+		if currentStatus == "PAID" {
+			if idempotencyKey != "" {
+				var existingOrderID, existingStatus string
+				err = tx.QueryRow(ctx, `SELECT po.payment_order_id::text, po.payment_status FROM payment_orders po JOIN obligation_payment_orders opo ON opo.payment_order_id=po.payment_order_id WHERE opo.obligation_id=$1 AND po.idempotency_key=$2`, obligationID, idempotencyKey).Scan(&existingOrderID, &existingStatus)
+				if err == nil {
+					_ = tx.Commit(ctx)
+					c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Permintaan pembayaran telah diproses sebelumnya", gin.H{"payment_order_id": existingOrderID, "obligation_id": obligationID, "payment_status": existingStatus, "idempotent_replay": true}))
+					return
+				}
+			}
+			c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Tagihan iuran ini sudah lunas", nil))
+			return
+		}
 
 		// A. Ambil & Kunci Wallet User (FOR UPDATE)
 		var walletID string
@@ -154,7 +177,23 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 			return
 		}
 
-		// B. Potong saldo dompet user
+		// B. Reserve the payment order before any balance mutation. The unique
+		// idempotency key rejects a simultaneous retry before it can debit again.
+		var paymentOrderID string
+		insertOrderQuery := `
+			INSERT INTO payment_orders (order_type, payment_method, amount, payment_status, idempotency_key)
+			VALUES ('CYCLE_CONTRIBUTION', 'WALLET', $1, 'CREATED', NULLIF($2, ''))
+			RETURNING payment_order_id::text;`
+		if err := tx.QueryRow(ctx, insertOrderQuery, obligationAmount, idempotencyKey).Scan(&paymentOrderID); err != nil {
+			c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Idempotency-Key sudah digunakan oleh pembayaran lain", nil))
+			return
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO obligation_payment_orders (payment_order_id, obligation_id) VALUES ($1, $2)`, paymentOrderID, obligationID); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menghubungkan relasi pembayaran", nil))
+			return
+		}
+
+		// C. Potong saldo dompet user
 		deductQuery := `
 			UPDATE user_wallets
 			SET balance = balance - $1, updated_at = NOW()
@@ -165,29 +204,7 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 			return
 		}
 
-		// C. Buat payment_order berstatus PAID
-		var paymentOrderID string
-		insertOrderQuery := `
-			INSERT INTO payment_orders (order_type, payment_method, amount, payment_status, paid_at, created_at, updated_at)
-			VALUES ('CYCLE_CONTRIBUTION', 'WALLET', $1, 'PAID', NOW(), NOW(), NOW())
-			RETURNING payment_order_id::text;
-		`
-		if err := tx.QueryRow(ctx, insertOrderQuery, obligationAmount).Scan(&paymentOrderID); err != nil {
-			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mencatat order pembayaran: "+err.Error(), nil))
-			return
-		}
-
-		// D. Hubungkan payment_order dengan cycle_obligation
-		linkQuery := `
-			INSERT INTO obligation_payment_orders (payment_order_id, obligation_id)
-			VALUES ($1, $2);
-		`
-		if _, err := tx.Exec(ctx, linkQuery, paymentOrderID, obligationID); err != nil {
-			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menghubungkan relasi pembayaran: "+err.Error(), nil))
-			return
-		}
-
-		// E. Update status obligation menjadi PAID
+		// D. Update status obligation and payment order menjadi PAID
 		updateObligationQuery := `
 			UPDATE cycle_obligations
 			SET obligation_status = 'PAID'
@@ -197,12 +214,16 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memperbarui status tagihan: "+err.Error(), nil))
 			return
 		}
+		if _, err := tx.Exec(ctx, `UPDATE payment_orders SET payment_status='PAID', paid_at=NOW() WHERE payment_order_id=$1`, paymentOrderID); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memperbarui order pembayaran", nil))
+			return
+		}
 		if err := advanceCycleAfterCollection(ctx, tx, obligationID); err != nil {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memperbarui status siklus", nil))
 			return
 		}
 
-		// F. Catat mutasi ledger di wallet_transactions
+		// E. Catat mutasi ledger di wallet_transactions
 		insertTxQuery := `
 			INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description, created_at)
 			VALUES ($1, $2, 'DUES_PAYMENT', $3, 'Pembayaran Iuran Arisan', NOW());
@@ -231,6 +252,10 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 
 	if method != "MANUAL_TRANSFER" {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "payment_method harus WALLET atau MANUAL_TRANSFER", nil))
+		return
+	}
+	if currentStatus == "PAID" {
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Tagihan iuran ini sudah lunas", nil))
 		return
 	}
 	var paymentOrderID string
@@ -355,6 +380,22 @@ func (h *PaymentHandler) ReviewPaymentProof(c *gin.Context) {
 	input.ReviewStatus = strings.ToUpper(strings.TrimSpace(input.ReviewStatus))
 	if input.ReviewStatus != "APPROVED" && input.ReviewStatus != "REJECTED" {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "review_status harus APPROVED atau REJECTED", nil))
+		return
+	}
+	var payerID, reviewerRole string
+	err := h.DB.QueryRow(c.Request.Context(), `
+		SELECT payer_cm.user_id::text, reviewer_cm.membership_role
+		FROM payment_proofs pp
+		JOIN payment_orders po ON po.payment_order_id=pp.payment_order_id
+		JOIN obligation_payment_orders opo ON opo.payment_order_id=po.payment_order_id
+		JOIN cycle_obligations co ON co.obligation_id=opo.obligation_id
+		JOIN cycle_participants cp ON cp.cycle_participant_id=co.cycle_participant_id
+		JOIN circle_memberships payer_cm ON payer_cm.circle_membership_id=cp.circle_membership_id
+		JOIN arisan_cycles ac ON ac.cycle_id=cp.cycle_id
+		JOIN circle_memberships reviewer_cm ON reviewer_cm.circle_id=ac.circle_id AND reviewer_cm.user_id=$2 AND reviewer_cm.membership_status='ACTIVE'
+		WHERE pp.payment_proof_id=$1`, proofID, reviewerID).Scan(&payerID, &reviewerRole)
+	if err != nil || payerID == reviewerID || (reviewerRole != "OWNER" && reviewerRole != "ADMIN") {
+		c.JSON(http.StatusForbidden, dto.BuildResponse(http.StatusForbidden, "error", "Hanya owner/admin lain yang dapat meninjau bukti transfer", nil))
 		return
 	}
 
