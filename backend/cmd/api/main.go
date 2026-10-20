@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"backend-arisankita/internal/config"
 	"backend-arisankita/internal/handlers"
@@ -23,10 +24,11 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS Setup untuk Frontend React Vite
+	// CORS is explicit to prevent arbitrary websites from using authenticated APIs.
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowOrigins = allowedCORSOrigins()
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"}
 	r.Use(cors.New(corsConfig))
 
 	// Inisialisasi Layer Repositories & Services
@@ -160,4 +162,19 @@ func main() {
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("[FATAL] Gagal menjalankan server: %v", err)
 	}
+}
+
+func allowedCORSOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if origin := strings.TrimSpace(part); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
 }
