@@ -10,8 +10,16 @@ import (
 )
 
 type drawRepoStub struct {
-	info  *repository.CircleCycleInfo
-	saved bool
+	info        *repository.CircleCycleInfo
+	saved       bool
+	bids        []repository.BidEntry
+	paidPot     float64
+	executed    bool
+	winner      repository.BidEntry
+	winningRate float64
+	payableRate float64
+	grossAmount float64
+	netAmount   float64
 }
 
 func (s *drawRepoStub) GetCycleParticipantsPaginated(context.Context, string, int, int) ([]repository.ParticipantDB, int64, error) {
@@ -24,14 +32,15 @@ func (s *drawRepoStub) GetCircleInfoByCycle(context.Context, string) (*repositor
 	return s.info, nil
 }
 func (s *drawRepoStub) GetActiveBidsByCycle(context.Context, string) ([]repository.BidEntry, error) {
-	return nil, nil
+	return s.bids, nil
 }
 func (s *drawRepoStub) SaveBid(context.Context, string, string, float64) error {
 	s.saved = true
 	return nil
 }
-func (s *drawRepoStub) ExecuteSPSBDrawTransaction(context.Context, string, repository.BidEntry, float64, float64, float64, float64, string) (string, error) {
-	return "", errors.New("not used")
+func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _ string, winner repository.BidEntry, winningRate, payableRate, grossAmount, netAmount float64, _ string) (string, error) {
+	s.executed, s.winner, s.winningRate, s.payableRate, s.grossAmount, s.netAmount = true, winner, winningRate, payableRate, grossAmount, netAmount
+	return "award", nil
 }
 func (s *drawRepoStub) ExecuteRandomDrawTransaction(context.Context, string, repository.ParticipantDB, float64, string, string, string, string, int) (string, error) {
 	return "", errors.New("not used")
@@ -45,10 +54,38 @@ func (s *drawRepoStub) GetCycleAward(context.Context, string) (*repository.Award
 func (s *drawRepoStub) OpenCycleWithParticipantsAndObligations(context.Context, string, int, time.Time) (string, error) {
 	return "", nil
 }
-func (s *drawRepoStub) GetPaidPot(context.Context, string) (float64, error) { return 0, nil }
+func (s *drawRepoStub) GetPaidPot(context.Context, string) (float64, error) { return s.paidPot, nil }
 func (s *drawRepoStub) CloseBidding(context.Context, string) error          { return nil }
 func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, int) ([]repository.CycleDB, error) {
 	return nil, nil
+}
+
+func TestExecuteSPSBUsesSecondPriceAndPaidPot(t *testing.T) {
+	floor := 1.0
+	repo := &drawRepoStub{
+		info:    &repository.CircleCycleInfo{TrackType: "SPSB", CycleStatus: "READY_FOR_DISBURSEMENT", BidFloorPercent: &floor},
+		paidPot: 3_000_000,
+		bids: []repository.BidEntry{
+			{ParticipantID: "farrel", UserID: "user-a", FullName: "Tiara", BidRatePercent: 7.5},
+			{ParticipantID: "faza", UserID: "user-b", FullName: "Leroy", BidRatePercent: 5.0},
+		},
+	}
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.executed || repo.winner.ParticipantID != "farrel" {
+		t.Fatalf("winner was not highest bid: %#v", repo.winner)
+	}
+	if repo.winningRate != 7.5 || repo.payableRate != 5.0 {
+		t.Fatalf("rates got win=%v payable=%v", repo.winningRate, repo.payableRate)
+	}
+	if repo.grossAmount != 3_000_000 || repo.netAmount != 2_850_000 {
+		t.Fatalf("amount got gross=%v net=%v", repo.grossAmount, repo.netAmount)
+	}
+	if result["net_disbursed_amount"] != float64(2_850_000) {
+		t.Fatalf("unexpected response: %#v", result)
+	}
 }
 func (s *drawRepoStub) GetCycle(context.Context, string) (*repository.CycleDB, error) {
 	return nil, nil
