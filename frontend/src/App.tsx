@@ -843,10 +843,29 @@ export default function App() {
     setCircle((current) => loaded.find((item) => item.id === current.id) ?? loaded[0]);
   }, []);
 
+  const hydrateUser = useCallback(async () => {
+    const [profileResponse, reputationResponse] = await Promise.all([
+      userWalletService.getProfile(),
+      userWalletService.getReputation(),
+    ]);
+    const profile = profileResponse.data?.data as { full_name?: string } | undefined;
+    const reputation = reputationResponse.data?.data as { reputation_score?: number } | undefined;
+    const fullName = profile?.full_name;
+    if (!fullName) return;
+    const initials = fullName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase();
+    setUser((current) => ({
+      ...current,
+      name: fullName,
+      initials: initials || 'AK',
+      reputation: reputation?.reputation_score ?? current.reputation,
+    }));
+  }, []);
+
   useEffect(() => {
     if (!user.isLoggedIn) return;
     hydrateCircles().catch(() => addToast('Gagal memuat daftar circle dari backend.', 'error'));
-  }, [user.isLoggedIn, hydrateCircles, addToast]);
+    hydrateUser().catch(() => addToast('Gagal memuat profil dari backend.', 'error'));
+  }, [user.isLoggedIn, hydrateCircles, hydrateUser, addToast]);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((p) => p.filter((t) => t.id !== id));
@@ -937,7 +956,7 @@ export default function App() {
 
         setUser({
           isLoggedIn: true,
-          role: 'OWNER',
+          role: 'MEMBER',
           name: userName,
           initials: userInitials || 'AK',
           reputation: 98,
