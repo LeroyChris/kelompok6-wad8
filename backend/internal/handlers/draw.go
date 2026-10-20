@@ -29,16 +29,7 @@ type CreateCycleInput struct {
 }
 
 func normalizeCycleID(id string) string {
-	switch id {
-	case "cyc-uuid-001":
-		return "c1111111-0001-0000-0000-000000000001"
-	case "cyc-uuid-002":
-		return "c1111111-0002-0000-0000-000000000002"
-	case "cyc-uuid-sqd-001", "cyc-spsb-001":
-		return "c2222222-0001-0000-0000-000000000001"
-	default:
-		return id
-	}
+	return id
 }
 
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
@@ -180,13 +171,4 @@ func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Data pemenang putaran arisan", award))
-}
-
-func (h *DrawHandler) GetGroupDraws(c *gin.Context) {
-	groupID := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"status":   "success",
-		"group_id": groupID,
-		"data":     []gin.H{},
-	})
 }

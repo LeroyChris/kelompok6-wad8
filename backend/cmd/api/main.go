@@ -121,14 +121,6 @@ func main() {
 			invitations.POST("/join", circleHandler.JoinCircle)
 		}
 
-		groups := v1.Group("/groups")
-		groups.Use(middleware.AuthMiddleware())
-		{
-			groups.POST("", circleHandler.CreateGroup)
-			groups.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetGroupDetail)
-			groups.POST("/:id/join", circleHandler.JoinGroup)
-		}
-
 		// Siklus & Mesin Lelang/Kocok
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
@@ -140,12 +132,6 @@ func main() {
 			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
 			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
 			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
-		}
-
-		draws := v1.Group("/draws")
-		draws.Use(middleware.AuthMiddleware())
-		{
-			draws.GET("/group/:id", drawHandler.GetGroupDraws)
 		}
 
 		// Pembayaran & Tagihan
@@ -160,13 +146,9 @@ func main() {
 		{
 			payments.GET("/:id", paymentHandler.GetPaymentDetail)
 			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof)
-			payments.POST("", paymentHandler.SubmitPayment)
-			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
-			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)
 		}
 
 		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), paymentHandler.ReviewPaymentProof)
-		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook)
 	}
 
 	port := os.Getenv("PORT")
