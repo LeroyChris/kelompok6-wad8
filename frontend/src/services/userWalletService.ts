@@ -1,26 +1,10 @@
-import axios from 'axios';
-
-const API = axios.create({
-  baseURL: 'http://localhost:8080/api/v1',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Interceptor: Otomatis lampirkan Token JWT dari LocalStorage ke Header
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import API from './api';
 
 export const userWalletService = {
   // 1. Auth & OTP
   requestOTP: (phone_number: string) => 
     API.post('/auth/request-otp', { phone_number }),
-  verifyOTP: (phone_number: string, otp_code: string) => 
+  verifyOTP: (phone_number: string, otp_code: string) =>
     API.post('/auth/verify-otp', { phone_number, otp_code }),
 
   // 2. User Profile & Reputation
