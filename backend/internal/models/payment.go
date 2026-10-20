@@ -9,6 +9,7 @@ type PaymentOrder struct {
 	PaymentMethod    string     `json:"payment_method"` // GATEWAY, MANUAL_TRANSFER, E_WALLET
 	Provider         *string    `json:"provider,omitempty"`
 	ProviderOrderRef *string    `json:"provider_order_ref,omitempty"`
+	IdempotencyKey   *string    `json:"idempotency_key,omitempty"`
 	Amount           float64    `json:"amount"`
 	PaymentStatus    string     `json:"payment_status"` // CREATED, PENDING, PENDING_REVIEW, PAID, FAILED, EXPIRED, REFUNDED, REJECTED
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`

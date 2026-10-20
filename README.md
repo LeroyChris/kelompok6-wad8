@@ -1,8 +1,10 @@
 # ArisanKita 🪙
 
-> **Modern Closed-Loop Community SaaS & Rotating Savings and Credit Association (ROSCA) Platform.**
+> **Platform arisan privat dengan wallet sandbox dan mekanisme Random Draw/SPSB.**
 
-ArisanKita adalah platform manajemen arisan komunal privat dan patungan modal internal (*Internal Crowdfunding*) yang mendigitalisasi tradisi arisan lokal secara aman, adil, dan transparan. Dirancang khusus untuk komunitas tertutup (rekan kantor, asosiasi UMKM/pedagang pasar, klub olahraga, dan keluarga).
+ArisanKita adalah platform manajemen arisan komunal privat yang mendigitalisasi iuran, penentuan pemenang, dan pencairan dana secara transparan. Dirancang untuk komunitas tertutup seperti keluarga, rekan kantor, atau komunitas hobi.
+
+Product scope dan kontrak backend resmi tersedia di [`prd.md`](./prd.md).
 
 ---
 
@@ -18,14 +20,13 @@ ArisanKita adalah platform manajemen arisan komunal privat dan patungan modal in
 - Status siklus otomatis: *Recruiting* ➔ *Locked* ➔ *Bidding/Spin* ➔ *Payment* ➔ *Disbursed* ➔ *Completed*.
 - Matriks monitoring iuran (Lunas, Pending, Menunggak).
 
-### 3. Patungan Modal Internal (*Closed-Loop Crowdfunding*)
-- Kampanye pinjaman/patungan modal tambahan antar sesama anggota satu Circle.
-- Pembayaran cicilan terpotong otomatis pada iuran putaran berikutnya.
-
-### 4. Zero-Friction Onboarding & Audit Keamanan
+### 3. Wallet Sandbox & Audit
+- Pembayaran iuran melalui wallet internal atau bukti transfer manual.
+- Mutasi wallet, payment order, dan disbursement tercatat untuk kebutuhan demo dan audit.
 - Registrasi ringan tanpa KTP di awal.
-- Log transaksi terverifikasi dengan audit trail hash (SHA-256).
-- Skor reputasi anggota (*reputation score*) berbasis riwayat pembayaran.
+
+### Roadmap (bukan scope final)
+- Crowdfunding internal, loan, KYC provider, payment gateway sungguhan, dan withdrawal bank.
 
 ---
 
@@ -36,7 +37,7 @@ ArisanKita adalah platform manajemen arisan komunal privat dan patungan modal in
 | **Frontend** | React 19, TypeScript, Vite, TailwindCSS, Lucide Icons |
 | **Backend** | Go (Golang), Gin Web Framework |
 | **Database** | PostgreSQL, `jackc/pgx/v5` (High-Performance Raw SQL Connection Pool) |
-| **Security** | JWT Authentication, Bcrypt Password Hashing |
+| **Security** | JWT Authentication, resource-level RBAC |
 | **Architecture** | 3-Tier Layered Architecture (Handler, Service, Repository) |
 
 ---
@@ -75,8 +76,11 @@ cd kelompok6-wad8
 ### 2. Setup Database
 Jalankan file SQL DDL yang tersedia untuk menginisialisasi skema tabel:
 ```bash
-# Eksekusi migrasi di instance PostgreSQL Anda
-psql -h <HOST> -U <USER> -d <DBNAME> -f backend/migrations/000001_init_schema.sql
+# Jalankan berurutan pada database lokal/demo yang kosong
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/000_reset_public_schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_schema_v2.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_core_hardening.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_seed_demo_data.sql
 ```
 
 ### 3. Menjalankan Backend
