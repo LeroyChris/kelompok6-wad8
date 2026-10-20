@@ -137,6 +137,7 @@ func main() {
 			cycles.GET("/:id/participants", drawHandler.GetCycleParticipants)
 			cycles.GET("/:id/obligations", drawHandler.GetCycleObligations)
 			cycles.POST("/:id/bids", drawHandler.SubmitCycleBid)
+			cycles.POST("/:id/bidding/close", drawHandler.CloseBidding)
 			cycles.POST("/:id/draw", drawHandler.ExecuteCycleDraw)
 			cycles.GET("/:id/award", drawHandler.GetCycleAward)
 		}

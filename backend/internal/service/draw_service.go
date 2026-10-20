@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
+	"strings"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -22,6 +22,7 @@ type DrawService interface {
 	GetCycleObligations(ctx context.Context, cycleID string) ([]repository.ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
 	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
+	CloseBidding(ctx context.Context, cycleID string) error
 }
 
 type drawService struct {
@@ -68,13 +69,16 @@ func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map
 		return nil, err
 	}
 
-	if info.CycleStatus == "COMPLETED" {
-		return nil, errors.New("siklus arisan ini sudah selesai dan pemenang telah ditetapkan sebelumnya")
+	if info.CycleStatus != "READY_FOR_DISBURSEMENT" {
+		return nil, errors.New("siklus harus berstatus READY_FOR_DISBURSEMENT sebelum pemenang dapat ditetapkan")
 	}
 
-	grossAmount := info.ContributionAmount * float64(info.MemberLimit)
+	grossAmount, err := s.repo.GetPaidPot(ctx, cycleID)
+	if err != nil {
+		return nil, fmt.Errorf("gagal menghitung pot iuran: %w", err)
+	}
 	if grossAmount <= 0 {
-		grossAmount = 5000000.00 // Default fallback bila parameter limit belum diisi
+		return nil, errors.New("belum ada iuran lunas untuk dicairkan")
 	}
 
 	// 2. Cabang Logika Berdasarkan Track Type
@@ -164,14 +168,16 @@ func (s *drawService) executeProvablyFairRandomDraw(
 	if _, err := rand.Read(seedBytes); err != nil {
 		return nil, fmt.Errorf("gagal menghasilkan seed kriptografi: %w", err)
 	}
-	seedCommitment := hex.EncodeToString(seedBytes)
-
-	// Pemilihan Pemenang dengan crypto/rand
-	nBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(candidates))))
-	if err != nil {
-		return nil, fmt.Errorf("gagal mengundi pemenang: %w", err)
+	commitmentBytes := sha256.Sum256(seedBytes)
+	seedCommitment := hex.EncodeToString(commitmentBytes[:])
+	// Deterministic selection lets members verify the revealed seed afterwards.
+	selection := sha256.Sum256(append(seedBytes, []byte(cycleID)...))
+	winner := candidates[int(selection[0])%len(candidates)]
+	participantIDs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		participantIDs = append(participantIDs, candidate.ParticipantID)
 	}
-	winner := candidates[nBig.Int64()]
+	snapshot := sha256.Sum256([]byte(strings.Join(participantIDs, ",")))
 
 	// Buat Hash Keputusan
 	hashRaw := fmt.Sprintf("RANDOM:%s:%s:%s:%d", cycleID, winner.UserID, seedCommitment, time.Now().UnixNano())
@@ -180,7 +186,7 @@ func (s *drawService) executeProvablyFairRandomDraw(
 
 	// Eksekusi Transaksi Atomis (Simpan Award, Audit Trail, Pencairan ke Dompet Pemenang)
 	awardID, err := s.repo.ExecuteRandomDrawTransaction(
-		ctx, cycleID, winner, grossAmount, decisionHash, seedCommitment,
+		ctx, cycleID, winner, grossAmount, decisionHash, seedCommitment, hex.EncodeToString(seedBytes), hex.EncodeToString(snapshot[:]), len(candidates),
 	)
 	if err != nil {
 		return nil, err
@@ -215,6 +221,9 @@ func (s *drawService) SubmitBid(ctx context.Context, cycleID, userID string, bid
 	if info.TrackType != "SPSB" {
 		return errors.New("kelompok arisan ini menggunakan sistem kocokan acak (Random Draw), bukan sistem lelang (SPSB)")
 	}
+	if info.CycleStatus != "BIDDING_OPEN" {
+		return errors.New("bidding tidak sedang dibuka untuk siklus ini")
+	}
 
 	if info.BidFloorPercent != nil && bidRate < *info.BidFloorPercent {
 		return fmt.Errorf("tawaran minimal adalah %.2f%% sesuai batas bawah (bid floor) kelompok", *info.BidFloorPercent)
@@ -236,4 +245,8 @@ func (s *drawService) GetCycleAward(ctx context.Context, cycleID string) (*repos
 
 func (s *drawService) StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error) {
 	return s.repo.OpenCycleWithParticipantsAndObligations(ctx, circleID, cycleNumber, dueAt)
+}
+
+func (s *drawService) CloseBidding(ctx context.Context, cycleID string) error {
+	return s.repo.CloseBidding(ctx, cycleID)
 }

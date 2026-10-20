@@ -68,10 +68,12 @@ type DrawRepository interface {
 	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
-	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment string) (string, error)
+	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
 	GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error)
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
+	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
+	CloseBidding(ctx context.Context, cycleID string) error
 }
 
 type drawRepo struct {
@@ -254,7 +256,7 @@ func (r *drawRepo) GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]
 		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
 		JOIN users u ON u.user_id = cm.user_id
 		WHERE cp.cycle_id = $1 AND b.bid_status = 'ACTIVE'
-		ORDER BY b.bid_rate_percent DESC
+		ORDER BY b.bid_rate_percent DESC, b.submitted_at ASC, b.bid_id ASC
 		LIMIT 2;
 	`
 	rows, err := r.db.Query(ctx, query, cycleID)
@@ -291,12 +293,12 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	insertAwardQuery := `
 		INSERT INTO cycle_awards (
 			cycle_id, cycle_participant_id, award_method, gross_amount,
-			winning_bid_rate_percent, payable_bid_rate_percent, decision_hash, decided_at
+			penalty_amount, net_award_amount, winning_bid_rate_percent, payable_bid_rate_percent, decision_hash, decided_at
 		)
-		VALUES ($1, $2, 'SPSB', $3, $4, $5, $6, NOW())
+		VALUES ($1, $2, 'SPSB', $3, $4, $5, $6, $7, $8, NOW())
 		RETURNING award_id::text;
 	`
-	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.ParticipantID, grossAmount, winningRate, payableRate, decisionHash).Scan(&awardID)
+	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.ParticipantID, grossAmount, grossAmount-netAmount, netAmount, winningRate, payableRate, decisionHash).Scan(&awardID)
 	if err != nil {
 		return "", fmt.Errorf("failed to insert cycle award: %w", err)
 	}
@@ -350,7 +352,7 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 	cycleID string,
 	winner ParticipantDB,
 	grossAmount float64,
-	decisionHash, seedCommitment string,
+	decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int,
 ) (string, error) {
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -362,9 +364,9 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 	insertAwardQuery := `
 		INSERT INTO cycle_awards (
 			cycle_id, cycle_participant_id, award_method, gross_amount,
-			decision_hash, decided_at
+			penalty_amount, net_award_amount, decision_hash, decided_at
 		)
-		VALUES ($1, $2, 'RANDOM_DRAW', $3, $4, NOW())
+		VALUES ($1, $2, 'RANDOM_DRAW', $3, 0, $3, $4, NOW())
 		RETURNING award_id::text;
 	`
 	err = tx.QueryRow(ctx, insertAwardQuery, cycleID, winner.ParticipantID, grossAmount, decisionHash).Scan(&awardID)
@@ -374,11 +376,11 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 
 	insertDrawResultQuery := `
 		INSERT INTO draw_results (
-			award_id, random_seed_commitment, random_source, participant_count, drawn_at
+			award_id, random_seed_commitment, random_seed_reveal, participant_snapshot_hash, algorithm_version, random_source, participant_count, drawn_at
 		)
-		VALUES ($1, $2, 'CRYPTO_SECURE_RANDOM', 1, NOW());
+		VALUES ($1, $2, $3, $4, 'SHA256_MOD_V1', 'CRYPTO_SECURE_RANDOM', $5, NOW());
 	`
-	if _, err := tx.Exec(ctx, insertDrawResultQuery, awardID, seedCommitment); err != nil {
+	if _, err := tx.Exec(ctx, insertDrawResultQuery, awardID, seedCommitment, seedReveal, snapshotHash, participantCount); err != nil {
 		return "", fmt.Errorf("failed to record draw result audit: %w", err)
 	}
 
@@ -424,6 +426,31 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 	}
 
 	return awardID, nil
+}
+
+func (r *drawRepo) GetPaidPot(ctx context.Context, cycleID string) (float64, error) {
+	var amount float64
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(SUM(co.amount_due), 0)::float8
+		FROM cycle_obligations co
+		JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
+		WHERE cp.cycle_id = $1 AND co.obligation_status = 'PAID'`, cycleID).Scan(&amount)
+	return amount, err
+}
+
+func (r *drawRepo) CloseBidding(ctx context.Context, cycleID string) error {
+	command, err := r.db.Exec(ctx, `
+		UPDATE arisan_cycles
+		SET cycle_status = 'READY_FOR_DISBURSEMENT'
+		WHERE cycle_id = $1
+		  AND cycle_status = 'BIDDING_OPEN'`, cycleID)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return errors.New("bidding belum dapat ditutup atau siklus tidak ditemukan")
+	}
+	return nil
 }
 
 func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error) {
@@ -523,7 +550,14 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 
 	insertParticipantsQuery := `
 		INSERT INTO cycle_participants (cycle_id, circle_membership_id, participation_status)
-		SELECT $1, cm.circle_membership_id, 'ELIGIBLE'
+		SELECT $1, cm.circle_membership_id,
+			CASE WHEN EXISTS (
+				SELECT 1 FROM cycle_awards ca
+				JOIN cycle_participants previous_cp ON previous_cp.cycle_participant_id = ca.cycle_participant_id
+				JOIN circle_memberships previous_cm ON previous_cm.circle_membership_id = previous_cp.circle_membership_id
+				JOIN arisan_cycles previous_cycle ON previous_cycle.cycle_id = ca.cycle_id
+				WHERE previous_cycle.circle_id = $2 AND previous_cm.user_id = cm.user_id
+			) THEN 'EXCLUDED' ELSE 'ELIGIBLE' END
 		FROM circle_memberships cm
 		WHERE cm.circle_id = $2 AND cm.membership_status = 'ACTIVE'
 		ON CONFLICT (cycle_id, circle_membership_id) DO NOTHING;
