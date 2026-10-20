@@ -49,6 +49,7 @@ type RoleType  = 'OWNER' | 'MEMBER';
 
 interface UserState   { isLoggedIn: boolean; role: RoleType; name: string; initials: string; reputation: number; }
 interface CircleState { id: string; name: string; trackType: TrackType; }
+interface CircleAPIItem { circle_id: string; circle_name: string; track_type: TrackType; }
 interface Toast       { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error'; }
 interface PaymentCtx  { amount: number; purpose: string; }
 interface NavItem     { id: string; icon: React.ReactNode; label: string; targetScreen: Screen; activeOn: Screen[]; }
@@ -790,9 +791,9 @@ export default function App() {
     return {
       isLoggedIn: !!isValidToken,
       role: 'OWNER',
-      name: 'Farrel Abda',
-      initials: 'FA',
-      reputation: 98,
+      name: 'Pengguna',
+      initials: 'AK',
+      reputation: 100,
     };
   });
 
@@ -829,6 +830,23 @@ export default function App() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  const hydrateCircles = useCallback(async () => {
+    const response = await circleService.getCircles({ limit: 20 });
+    const items = response.data?.data?.items as CircleAPIItem[] | undefined;
+    if (!items?.length) {
+      setCircles([]);
+      return;
+    }
+    const loaded = items.map((item) => ({ id: item.circle_id, name: item.circle_name, trackType: item.track_type }));
+    setCircles(loaded);
+    setCircle((current) => loaded.find((item) => item.id === current.id) ?? loaded[0]);
+  }, []);
+
+  useEffect(() => {
+    if (!user.isLoggedIn) return;
+    hydrateCircles().catch(() => addToast('Gagal memuat daftar circle dari backend.', 'error'));
+  }, [user.isLoggedIn, hydrateCircles, addToast]);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((p) => p.filter((t) => t.id !== id));
@@ -912,6 +930,7 @@ export default function App() {
       if (token) {
         localStorage.setItem('token', token);
         if (inviteCode.trim()) await circleService.joinCircle(inviteCode.trim());
+        await hydrateCircles();
         const uData = res.data?.data?.user || res.data?.user;
         const userName = uData?.full_name || 'Pengguna';
         const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
@@ -936,7 +955,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [phone, otpValues, inviteCode, addToast]);
+  }, [phone, otpValues, inviteCode, addToast, hydrateCircles]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
