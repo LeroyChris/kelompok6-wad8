@@ -134,6 +134,7 @@ func main() {
 			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
 			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
 			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
+			cycles.GET("/:id/draw-proof", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetDrawProof)
 		}
 
 		// Pembayaran & Tagihan

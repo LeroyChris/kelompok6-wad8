@@ -53,6 +53,9 @@ func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, int) ([]r
 func (s *drawRepoStub) GetCycle(context.Context, string) (*repository.CycleDB, error) {
 	return nil, nil
 }
+func (s *drawRepoStub) GetDrawProof(context.Context, string) (*repository.DrawProofDB, error) {
+	return nil, nil
+}
 
 var _ repository.DrawRepository = (*drawRepoStub)(nil)
 

@@ -194,3 +194,17 @@ func (h *DrawHandler) GetCycleAward(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Data pemenang putaran arisan", award))
 }
+
+func (h *DrawHandler) GetDrawProof(c *gin.Context) {
+	cycleID := normalizeCycleID(c.Param("id"))
+	proof, err := h.drawService.GetDrawProof(c.Request.Context(), cycleID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil bukti draw", nil))
+		return
+	}
+	if proof == nil {
+		c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Bukti draw belum tersedia untuk siklus ini", nil))
+		return
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Bukti random draw berhasil diambil", proof))
+}
