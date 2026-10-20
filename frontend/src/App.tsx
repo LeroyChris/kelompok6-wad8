@@ -1088,6 +1088,8 @@ export default function App() {
               onBack={handleLogout}
               onNavigate={handleDashboardNav}
               onOpenPayment={() => openPayment(1_000_000, 'Iuran Bulanan Siklus 4')}
+              circleId={circle.id}
+              circleName={circle.name}
             />
           </ErrorBoundary>
         );
