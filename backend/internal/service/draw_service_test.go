@@ -37,6 +37,9 @@ func (s *drawRepoStub) GetCircleInfoByCycle(context.Context, string) (*repositor
 func (s *drawRepoStub) GetActiveBidsByCycle(context.Context, string) ([]repository.BidEntry, error) {
 	return s.bids, nil
 }
+func (s *drawRepoStub) GetUserBid(context.Context, string, string) (*repository.BidEntry, error) {
+	return nil, nil
+}
 func (s *drawRepoStub) SaveBid(context.Context, string, string, float64) error {
 	s.saved = true
 	return nil

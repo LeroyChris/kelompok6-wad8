@@ -107,8 +107,10 @@ func main() {
 			circles.POST("/join", circleHandler.JoinCircle)
 			circles.GET("", circleHandler.GetCircles)
 			circles.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleDetail)
+			circles.PATCH("/:id", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateCircle)
 			circles.POST("/:id/lock", middleware.RequireCircleRole(db, "OWNER"), circleHandler.LockCircle)
 			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
+			circles.GET("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.GetInvitations)
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 
@@ -131,6 +133,7 @@ func main() {
 			cycles.GET("/:id/participants", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleParticipants)
 			cycles.GET("/:id/obligations", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleObligations)
 			cycles.POST("/:id/bids", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
+			cycles.GET("/:id/bids/me", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetMyCycleBid)
 			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
 			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
 			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
@@ -142,6 +145,8 @@ func main() {
 		obligations.Use(middleware.AuthMiddleware())
 		{
 			obligations.POST("/:id/pay", paymentHandler.PayObligation)
+			obligations.POST("/:id/payments/wallet", paymentHandler.PayObligation)
+			obligations.POST("/:id/payments/manual", paymentHandler.PayObligation)
 		}
 
 		payments := v1.Group("/payments")

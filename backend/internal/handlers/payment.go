@@ -87,6 +87,12 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 	_ = c.ShouldBindJSON(&input)
 
 	method := strings.ToUpper(input.PaymentMethod)
+	if strings.HasSuffix(c.FullPath(), "/payments/wallet") {
+		method = "WALLET"
+	}
+	if strings.HasSuffix(c.FullPath(), "/payments/manual") {
+		method = "MANUAL_TRANSFER"
+	}
 	if method == "" {
 		method = "WALLET"
 	}

@@ -89,6 +89,7 @@ type DrawRepository interface {
 	GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error)
 	GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error)
 	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
+	GetUserBid(ctx context.Context, cycleID, userID string) (*BidEntry, error)
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
 	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
@@ -300,6 +301,18 @@ func (r *drawRepo) GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]
 		bids = append(bids, b)
 	}
 	return bids, nil
+}
+
+func (r *drawRepo) GetUserBid(ctx context.Context, cycleID, userID string) (*BidEntry, error) {
+	var bid BidEntry
+	err := r.db.QueryRow(ctx, `SELECT cp.cycle_participant_id::text,cm.user_id::text,u.full_name,b.bid_rate_percent::float8 FROM bids b JOIN cycle_participants cp ON cp.cycle_participant_id=b.cycle_participant_id JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id JOIN users u ON u.user_id=cm.user_id WHERE cp.cycle_id=$1 AND cm.user_id=$2 AND b.bid_status='ACTIVE'`, cycleID, userID).Scan(&bid.ParticipantID, &bid.UserID, &bid.FullName, &bid.BidRatePercent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &bid, nil
 }
 
 func (r *drawRepo) ExecuteSPSBDrawTransaction(

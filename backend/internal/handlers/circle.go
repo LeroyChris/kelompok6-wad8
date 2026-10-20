@@ -39,6 +39,9 @@ type UpdateMemberInput struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
 }
+type UpdateCircleInput struct {
+	CircleName string `json:"circle_name" binding:"required"`
+}
 
 func circleInviteCode() (string, error) {
 	bytes := make([]byte, 6)
@@ -187,6 +190,25 @@ func (h *CircleHandler) GetCircleDetail(c *gin.Context) {
 	c.JSON(200, dto.BuildResponse(200, "success", "Detail circle berhasil diambil", data))
 }
 
+func (h *CircleHandler) UpdateCircle(c *gin.Context) {
+	var input UpdateCircleInput
+	if err := c.ShouldBindJSON(&input); err != nil || strings.TrimSpace(input.CircleName) == "" {
+		c.JSON(400, dto.BuildResponse(400, "error", "circle_name wajib diisi", nil))
+		return
+	}
+	var name string
+	err := h.DB.QueryRow(c.Request.Context(), `UPDATE circles SET circle_name=$1 WHERE circle_id=$2 AND circle_status='RECRUITING' RETURNING circle_name`, strings.TrimSpace(input.CircleName), c.Param("id")).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(409, dto.BuildResponse(409, "error", "Circle tidak ditemukan atau tidak dapat diubah setelah dikunci", nil))
+		return
+	}
+	if err != nil {
+		c.JSON(500, dto.BuildResponse(500, "error", "Gagal memperbarui circle", nil))
+		return
+	}
+	c.JSON(200, dto.BuildResponse(200, "success", "Circle berhasil diperbarui", gin.H{"circle_id": c.Param("id"), "circle_name": name}))
+}
+
 func (h *CircleHandler) JoinCircle(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {
@@ -257,6 +279,28 @@ func (h *CircleHandler) CreateInvitation(c *gin.Context) {
 		return
 	}
 	c.JSON(201, dto.BuildResponse(201, "success", "Kode undangan berhasil dibuat", gin.H{"invitation_id": invitationID, "circle_id": c.Param("id"), "invite_code": code, "expires_at": expiry.Format(time.RFC3339)}))
+}
+
+func (h *CircleHandler) GetInvitations(c *gin.Context) {
+	rows, err := h.DB.Query(c.Request.Context(), `SELECT invitation_id::text,invite_code,invitation_status,expires_at,accepted_by_user_id::text,accepted_at FROM circle_invitations WHERE circle_id=$1 ORDER BY created_at DESC LIMIT $2`, c.Param("id"), circleLimit(c))
+	if err != nil {
+		c.JSON(500, dto.BuildResponse(500, "error", "Gagal mengambil undangan", nil))
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var id, code, status string
+		var expires time.Time
+		var acceptedBy *string
+		var acceptedAt *time.Time
+		if err := rows.Scan(&id, &code, &status, &expires, &acceptedBy, &acceptedAt); err != nil {
+			c.JSON(500, dto.BuildResponse(500, "error", "Data undangan tidak valid", nil))
+			return
+		}
+		items = append(items, gin.H{"invitation_id": id, "invite_code": code, "invitation_status": status, "expires_at": expires, "accepted_by_user_id": acceptedBy, "accepted_at": acceptedAt})
+	}
+	c.JSON(200, dto.BuildResponse(200, "success", "Daftar undangan berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": circleLimit(c)}}))
 }
 
 func (h *CircleHandler) GetCircleMembers(c *gin.Context) {

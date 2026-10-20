@@ -83,6 +83,25 @@ func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	}))
 }
 
+func (h *DrawHandler) GetMyCycleBid(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
+		return
+	}
+	cycleID := normalizeCycleID(c.Param("id"))
+	bid, err := h.drawService.GetUserBid(c.Request.Context(), cycleID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil bid", nil))
+		return
+	}
+	if bid == nil {
+		c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Belum ada bid aktif", nil))
+		return
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Bid aktif berhasil diambil", gin.H{"cycle_id": cycleID, "bid_rate_percent": bid.BidRatePercent, "bid_status": "ACTIVE"}))
+}
+
 func (h *DrawHandler) CloseBidding(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 	if err := h.drawService.CloseBidding(c.Request.Context(), cycleID); err != nil {
