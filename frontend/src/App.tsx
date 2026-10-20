@@ -888,9 +888,8 @@ export default function App() {
       addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 123456)', 'info');
       setOtpOpen(true);
       setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
-    } catch {
-      setOtpOpen(true);
-      setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
+    } catch (err: any) {
+      addToast(err.response?.data?.message || 'Nomor telepon belum terdaftar.', 'error');
     } finally {
       setLoading(false);
     }
@@ -907,20 +906,21 @@ export default function App() {
     try {
       setLoading(true);
       const normalizedPhone = normalizePhoneForApi(phone || '81234567890');
-      const res = await userWalletService.verifyOTP(normalizedPhone, otpCode, inviteCode);
+      const res = await userWalletService.verifyOTP(normalizedPhone, otpCode);
 
       const token = res.data?.data?.token || res.data?.token;
       if (token) {
         localStorage.setItem('token', token);
+        if (inviteCode.trim()) await circleService.joinCircle(inviteCode.trim());
         const uData = res.data?.data?.user || res.data?.user;
-        const userName = uData?.full_name || 'Farrel Abda';
+        const userName = uData?.full_name || 'Pengguna';
         const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 
         setUser({
           isLoggedIn: true,
           role: 'OWNER',
           name: userName,
-          initials: userInitials || 'FA',
+          initials: userInitials || 'AK',
           reputation: 98,
         });
 
@@ -997,9 +997,12 @@ export default function App() {
   const handleWizardComplete = useCallback(async (name: string, track: TrackType) => {
     try {
       const res = await circleService.createCircle({
-        name,
+        circle_name: name,
         track_type: track,
-        monthly_dues: 1000000,
+        contribution_amount: 1000000,
+        member_limit: 5,
+        period_type: 'MONTHLY',
+        ...(track === 'SPSB' ? { bid_floor_percent: 1, bid_ceiling_percent: 20 } : {}),
       });
 
       const newCircle: CircleState = res.data?.data ? {
@@ -1021,20 +1024,8 @@ export default function App() {
       setScreenState(dest);
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
-    } catch {
-      const fallbackCircle: CircleState = {
-        id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
-        name,
-        trackType: track,
-      };
-      setCircles((p) => [...p, fallbackCircle]);
-      setCircle(fallbackCircle);
-      setUser((u) => ({ ...u, isLoggedIn: true }));
-      setWizardOpen(false);
-      const dest: Screen = track === 'SPSB' ? 'dashboard' : 'spin_wheel';
-      setScreenState(dest);
-      window.location.hash = SCREEN_TO_HASH[dest];
-      addToast(`Circle "${name}" dibuat dalam mode lokal.`, 'info');
+    } catch (err: any) {
+      addToast(err.response?.data?.message || `Gagal membuat circle "${name}".`, 'error');
     }
   }, [addToast]);
 
