@@ -110,7 +110,7 @@ export default function Dashboard({
   const [topUpLoading, setTopUpLoading]       = useState<boolean>(false);
 
   // STATE REKENING BANK
-  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<Array<{ id: string; bank_name: string; account_number: string; account_holder: string }>>([]);
   const [showBankModal, setBankModal]   = useState<boolean>(false);
   const [newBankName, setNewBankName]   = useState<string>('BCA');
   const [newAccNo, setNewAccNo]         = useState<string>('');
@@ -129,8 +129,8 @@ export default function Dashboard({
       if (resWallet.data?.data) setWalletBalance(resWallet.data.data.balance);
       if (resProfile.data?.data) setProfileName(resProfile.data.data.full_name);
       if (resRep.data?.data) setReputationScore(resRep.data.data.reputation_score);
-    } catch (err) {
-      console.warn('Backend API menggunakan data fallback lokal:', err);
+    } catch {
+      console.warn('Backend API tidak dapat dihubungi.');
     } finally {
       setApiLoading(false);
     }
@@ -140,8 +140,8 @@ export default function Dashboard({
     try {
       const res = await userWalletService.getBankAccounts();
       if (res.data?.data) setBankAccounts(res.data.data);
-    } catch (err) {
-      console.warn('Gagal mengambil daftar rekening bank:', err);
+    } catch {
+      console.warn('Gagal mengambil daftar rekening bank.');
     }
   };
 
@@ -163,7 +163,7 @@ export default function Dashboard({
         setWalletBalance(res.data.data.new_balance);
         setPayModal(false);
       }
-    } catch (err) {
+    } catch {
       alert('Gagal melakukan Top-Up ke Backend Go. Pastikan Server Go aktif.');
     } finally {
       setTopUpLoading(false);
@@ -185,7 +185,7 @@ export default function Dashboard({
       setNewAccNo('');
       setNewAccHolder('');
       fetchBankAccounts();
-    } catch (err) {
+    } catch {
       alert('Gagal menambah rekening bank');
     }
   };
@@ -195,7 +195,7 @@ export default function Dashboard({
     try {
       await userWalletService.deleteBankAccount(id);
       fetchBankAccounts();
-    } catch (err) {
+    } catch {
       alert('Gagal menghapus rekening');
     }
   };
