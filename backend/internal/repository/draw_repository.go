@@ -84,7 +84,7 @@ type DrawRepository interface {
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
 	CloseBidding(ctx context.Context, cycleID string) error
-	GetCyclesByCircle(ctx context.Context, circleID string) ([]CycleDB, error)
+	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*CycleDB, error)
 }
 
@@ -465,8 +465,8 @@ func (r *drawRepo) CloseBidding(ctx context.Context, cycleID string) error {
 	return nil
 }
 
-func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string) ([]CycleDB, error) {
-	rows, err := r.db.Query(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE circle_id=$1 ORDER BY cycle_number DESC`, circleID)
+func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error) {
+	rows, err := r.db.Query(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE circle_id=$1 AND ($2=0 OR cycle_number < $2) ORDER BY cycle_number DESC LIMIT $3`, circleID, cursor, limit)
 	if err != nil {
 		return nil, err
 	}
