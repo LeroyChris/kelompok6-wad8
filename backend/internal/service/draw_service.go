@@ -19,7 +19,7 @@ type DrawService interface {
 	GetParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]repository.ParticipantDB, dto.MetaPagination, error)
 	ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error)
 	SubmitBid(ctx context.Context, cycleID, userID string, bidRate float64) error
-	GetCycleObligations(ctx context.Context, cycleID string) ([]repository.ObligationDB, error)
+	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
 	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	CloseBidding(ctx context.Context, cycleID string) error
@@ -237,8 +237,8 @@ func (s *drawService) SubmitBid(ctx context.Context, cycleID, userID string, bid
 	return s.repo.SaveBid(ctx, cycleID, userID, bidRate)
 }
 
-func (s *drawService) GetCycleObligations(ctx context.Context, cycleID string) ([]repository.ObligationDB, error) {
-	return s.repo.GetCycleObligations(ctx, cycleID)
+func (s *drawService) GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ObligationDB, error) {
+	return s.repo.GetCycleObligations(ctx, cycleID, limit, cursorTime, cursorID)
 }
 
 func (s *drawService) GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error) {

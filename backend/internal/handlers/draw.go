@@ -160,13 +160,24 @@ func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
-	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID)
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
+	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID, limit+1, cursorTime, cursorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil tagihan: "+err.Error(), nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", obligations))
+	var nextCursor any
+	if len(obligations) > limit {
+		nextCursor = encodeWalletCursor(obligations[limit-1].CreatedAt, obligations[limit-1].ObligationID)
+		obligations = obligations[:limit]
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil tagihan iuran siklus", gin.H{"items": obligations, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
 
 func (h *DrawHandler) GetCycleAward(c *gin.Context) {
