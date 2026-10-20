@@ -62,6 +62,18 @@ type AwardDB struct {
 	DecidedAt      time.Time `json:"decided_at"`
 }
 
+type DrawProofDB struct {
+	AwardID                 string    `json:"award_id"`
+	CycleID                 string    `json:"cycle_id"`
+	RandomSeedCommitment    string    `json:"random_seed_commitment"`
+	RandomSeedReveal        *string   `json:"random_seed_reveal,omitempty"`
+	ParticipantSnapshotHash *string   `json:"participant_snapshot_hash,omitempty"`
+	AlgorithmVersion        string    `json:"algorithm_version"`
+	RandomSource            string    `json:"random_source"`
+	ParticipantCount        int       `json:"participant_count"`
+	DrawnAt                 time.Time `json:"drawn_at"`
+}
+
 type CycleDB struct {
 	CycleID        string     `json:"cycle_id"`
 	CircleID       string     `json:"circle_id"`
@@ -87,6 +99,7 @@ type DrawRepository interface {
 	CloseBidding(ctx context.Context, cycleID string) error
 	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*CycleDB, error)
+	GetDrawProof(ctx context.Context, cycleID string) (*DrawProofDB, error)
 }
 
 type drawRepo struct {
@@ -493,6 +506,24 @@ func (r *drawRepo) GetCycle(ctx context.Context, cycleID string) (*CycleDB, erro
 		return nil, err
 	}
 	return &item, nil
+}
+
+func (r *drawRepo) GetDrawProof(ctx context.Context, cycleID string) (*DrawProofDB, error) {
+	var proof DrawProofDB
+	err := r.db.QueryRow(ctx, `
+		SELECT ca.award_id::text,ca.cycle_id::text,dr.random_seed_commitment,dr.random_seed_reveal,
+			dr.participant_snapshot_hash,dr.algorithm_version,dr.random_source,dr.participant_count,dr.drawn_at
+		FROM cycle_awards ca JOIN draw_results dr ON dr.award_id=ca.award_id
+		WHERE ca.cycle_id=$1 AND ca.award_method='RANDOM_DRAW'`, cycleID).Scan(
+		&proof.AwardID, &proof.CycleID, &proof.RandomSeedCommitment, &proof.RandomSeedReveal,
+		&proof.ParticipantSnapshotHash, &proof.AlgorithmVersion, &proof.RandomSource, &proof.ParticipantCount, &proof.DrawnAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &proof, nil
 }
 
 func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ObligationDB, error) {
