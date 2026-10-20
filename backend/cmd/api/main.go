@@ -74,6 +74,7 @@ func main() {
 		{
 			users.GET("/me", userHandler.GetUserProfile)
 			users.PATCH("/me", userHandler.UpdateProfile)
+			users.GET("/me/win-history", userHandler.GetWinHistory)
 			users.GET("/me/reputation", userHandler.GetUserReputation)
 		}
 
@@ -84,6 +85,7 @@ func main() {
 			wallet.GET("", walletHandler.GetWalletBalance)
 			wallet.GET("/transactions", walletHandler.GetWalletTransactions)
 			wallet.POST("/topup", walletHandler.TopUpWallet)
+			wallet.POST("/topups", walletHandler.TopUpWallet)
 		}
 
 		// Rekening Bank

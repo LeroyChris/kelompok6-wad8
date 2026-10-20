@@ -41,8 +41,8 @@ type ContributeCrowdfundingRequest struct {
 // DTO untuk Update Profil User
 type UpdateProfileRequest struct {
 	FullName    string `json:"full_name"`
+	Email       string `json:"email" binding:"omitempty,email"`
 	PhoneNumber string `json:"phone_number"`
-	AvatarURL   string `json:"avatar_url"`
 }
 
 // DTO untuk Top-Up Saldo Sandbox
