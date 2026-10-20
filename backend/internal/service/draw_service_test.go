@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -10,23 +9,27 @@ import (
 )
 
 type drawRepoStub struct {
-	info        *repository.CircleCycleInfo
-	saved       bool
-	bids        []repository.BidEntry
-	paidPot     float64
-	executed    bool
-	winner      repository.BidEntry
-	winningRate float64
-	payableRate float64
-	grossAmount float64
-	netAmount   float64
+	info           *repository.CircleCycleInfo
+	saved          bool
+	bids           []repository.BidEntry
+	paidPot        float64
+	executed       bool
+	winner         repository.BidEntry
+	winningRate    float64
+	payableRate    float64
+	grossAmount    float64
+	netAmount      float64
+	candidates     []repository.ParticipantDB
+	randomWinner   repository.ParticipantDB
+	randomGross    float64
+	randomExecuted bool
 }
 
 func (s *drawRepoStub) GetCycleParticipantsPaginated(context.Context, string, int, int) ([]repository.ParticipantDB, int64, error) {
 	return nil, 0, nil
 }
 func (s *drawRepoStub) GetEligibleParticipants(context.Context, string) ([]repository.ParticipantDB, error) {
-	return nil, nil
+	return s.candidates, nil
 }
 func (s *drawRepoStub) GetCircleInfoByCycle(context.Context, string) (*repository.CircleCycleInfo, error) {
 	return s.info, nil
@@ -42,8 +45,9 @@ func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _ string, w
 	s.executed, s.winner, s.winningRate, s.payableRate, s.grossAmount, s.netAmount = true, winner, winningRate, payableRate, grossAmount, netAmount
 	return "award", nil
 }
-func (s *drawRepoStub) ExecuteRandomDrawTransaction(context.Context, string, repository.ParticipantDB, float64, string, string, string, string, int) (string, error) {
-	return "", errors.New("not used")
+func (s *drawRepoStub) ExecuteRandomDrawTransaction(_ context.Context, _ string, winner repository.ParticipantDB, gross float64, _ string, _ string, _ string, _ string, _ int) (string, error) {
+	s.randomExecuted, s.randomWinner, s.randomGross = true, winner, gross
+	return "award", nil
 }
 func (s *drawRepoStub) GetCycleObligations(context.Context, string, int, *time.Time, string) ([]repository.ObligationDB, error) {
 	return nil, nil
@@ -85,6 +89,30 @@ func TestExecuteSPSBUsesSecondPriceAndPaidPot(t *testing.T) {
 	}
 	if result["net_disbursed_amount"] != float64(2_850_000) {
 		t.Fatalf("unexpected response: %#v", result)
+	}
+}
+
+func TestExecuteRandomDrawUsesEligibleCandidatesAndPaidPot(t *testing.T) {
+	repo := &drawRepoStub{
+		info:    &repository.CircleCycleInfo{TrackType: "RANDOM_DRAW", CycleStatus: "READY_FOR_DISBURSEMENT"},
+		paidPot: 2_000_000,
+		candidates: []repository.ParticipantDB{
+			{ParticipantID: "tiara", UserID: "user-a", Name: "Tiara"},
+			{ParticipantID: "leroy", UserID: "user-b", Name: "Leroy"},
+		},
+	}
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.randomExecuted || repo.randomGross != 2_000_000 {
+		t.Fatalf("random draw transaction not executed correctly: %#v", repo)
+	}
+	if repo.randomWinner.ParticipantID != "tiara" && repo.randomWinner.ParticipantID != "leroy" {
+		t.Fatalf("winner not in eligible candidates: %#v", repo.randomWinner)
+	}
+	if result["award_method"] != "RANDOM_DRAW" || result["net_disbursed_amount"] != float64(2_000_000) {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 func (s *drawRepoStub) GetCycle(context.Context, string) (*repository.CycleDB, error) {
