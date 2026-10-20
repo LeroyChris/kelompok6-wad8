@@ -16,11 +16,11 @@ type ArisanCycle struct {
 
 // CycleParticipant merepresentasikan snapshot peserta di tabel cycle_participants
 type CycleParticipant struct {
-	CycleParticipantID string    `json:"cycle_participant_id"`
-	CycleID            string    `json:"cycle_id"`
-	CircleMembershipID string    `json:"circle_membership_id"`
-	ParticipationStatus string   `json:"participation_status"` // ELIGIBLE, EXCLUDED, REPLACED
-	CreatedAt          time.Time `json:"created_at"`
+	CycleParticipantID  string    `json:"cycle_participant_id"`
+	CycleID             string    `json:"cycle_id"`
+	CircleMembershipID  string    `json:"circle_membership_id"`
+	ParticipationStatus string    `json:"participation_status"` // ELIGIBLE, EXCLUDED, REPLACED
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 // CycleParticipantSubstitution merepresentasikan tabel cycle_participant_substitutions
@@ -60,6 +60,8 @@ type CycleAward struct {
 	CycleParticipantID    string    `json:"cycle_participant_id"`
 	AwardMethod           string    `json:"award_method"` // SPSB, RANDOM_DRAW
 	GrossAmount           float64   `json:"gross_amount"`
+	PenaltyAmount         float64   `json:"penalty_amount"`
+	NetAwardAmount        float64   `json:"net_award_amount"`
 	WinningBidRatePercent *float64  `json:"winning_bid_rate_percent,omitempty"`
 	PayableBidRatePercent *float64  `json:"payable_bid_rate_percent,omitempty"`
 	DecisionHash          *string   `json:"decision_hash,omitempty"`
@@ -68,10 +70,13 @@ type CycleAward struct {
 
 // DrawResult merepresentasikan seed acak pengundian di tabel draw_results
 type DrawResult struct {
-	DrawResultID         string    `json:"draw_result_id"`
-	AwardID              string    `json:"award_id"`
-	RandomSeedCommitment string    `json:"random_seed_commitment"`
-	RandomSource         string    `json:"random_source"`
-	ParticipantCount     int       `json:"participant_count"`
-	DrawnAt              time.Time `json:"drawn_at"`
+	DrawResultID            string    `json:"draw_result_id"`
+	AwardID                 string    `json:"award_id"`
+	RandomSeedCommitment    string    `json:"random_seed_commitment"`
+	RandomSeedReveal        *string   `json:"random_seed_reveal,omitempty"`
+	ParticipantSnapshotHash *string   `json:"participant_snapshot_hash,omitempty"`
+	AlgorithmVersion        string    `json:"algorithm_version"`
+	RandomSource            string    `json:"random_source"`
+	ParticipantCount        int       `json:"participant_count"`
+	DrawnAt                 time.Time `json:"drawn_at"`
 }
