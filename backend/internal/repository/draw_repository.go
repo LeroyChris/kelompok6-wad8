@@ -45,6 +45,7 @@ type ObligationDB struct {
 	AmountDue     float64   `json:"amount_due"`
 	DueAt         time.Time `json:"due_at"`
 	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type AwardDB struct {
@@ -79,7 +80,7 @@ type DrawRepository interface {
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
 	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
-	GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error)
+	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error)
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
@@ -494,7 +495,7 @@ func (r *drawRepo) GetCycle(ctx context.Context, cycleID string) (*CycleDB, erro
 	return &item, nil
 }
 
-func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]ObligationDB, error) {
+func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ObligationDB, error) {
 	query := `
 		SELECT
 			co.obligation_id::text,
@@ -503,15 +504,22 @@ func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]O
 			COALESCE(u.full_name, 'Anggota'),
 			co.amount_due,
 			co.due_at,
-			co.obligation_status
+			co.obligation_status,
+			co.created_at
 		FROM cycle_obligations co
 		JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
 		JOIN circle_memberships cm ON cm.circle_membership_id = cp.circle_membership_id
 		JOIN users u ON u.user_id = cm.user_id
 		WHERE cp.cycle_id = $1
-		ORDER BY co.created_at ASC;
+		  AND ($2::timestamptz IS NULL OR (co.created_at,co.obligation_id) > ($2::timestamptz,$3::uuid))
+		ORDER BY co.created_at ASC, co.obligation_id ASC
+		LIMIT $4;
 	`
-	rows, err := r.db.Query(ctx, query, cycleID)
+	var nullableCursor any
+	if cursorID != "" {
+		nullableCursor = cursorID
+	}
+	rows, err := r.db.Query(ctx, query, cycleID, cursorTime, nullableCursor, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get obligations: %w", err)
 	}
@@ -520,7 +528,7 @@ func (r *drawRepo) GetCycleObligations(ctx context.Context, cycleID string) ([]O
 	var list []ObligationDB
 	for rows.Next() {
 		var o ObligationDB
-		if err := rows.Scan(&o.ObligationID, &o.ParticipantID, &o.UserID, &o.FullName, &o.AmountDue, &o.DueAt, &o.Status); err != nil {
+		if err := rows.Scan(&o.ObligationID, &o.ParticipantID, &o.UserID, &o.FullName, &o.AmountDue, &o.DueAt, &o.Status, &o.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, o)
