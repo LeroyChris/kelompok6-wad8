@@ -888,8 +888,8 @@ export default function App() {
       addToast('Kode OTP dikirim ke WhatsApp Anda (Gunakan 123456)', 'info');
       setOtpOpen(true);
       setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
-    } catch (err: any) {
-      addToast(err.response?.data?.message || 'Nomor telepon belum terdaftar.', 'error');
+    } catch {
+      addToast('Nomor telepon belum terdaftar.', 'error');
     } finally {
       setLoading(false);
     }
@@ -931,9 +931,8 @@ export default function App() {
       } else {
         throw new Error('Respon token tidak ditemukan');
       }
-    } catch (err: any) {
-      const serverMsg = err.response?.data?.message || 'Gagal memverifikasi OTP. Pastikan backend Go aktif.';
-      addToast(serverMsg, 'error');
+    } catch {
+      addToast('Gagal memverifikasi OTP. Pastikan backend Go aktif.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1024,8 +1023,8 @@ export default function App() {
       setScreenState(dest);
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
-    } catch (err: any) {
-      addToast(err.response?.data?.message || `Gagal membuat circle "${name}".`, 'error');
+    } catch {
+      addToast(`Gagal membuat circle "${name}".`, 'error');
     }
   }, [addToast]);
 
