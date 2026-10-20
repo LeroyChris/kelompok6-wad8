@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -76,6 +78,44 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+// RequireCircleRole authorizes the authenticated user against an active circle
+// membership. Routes using this middleware must use :id as their circle ID.
+func RequireCircleRole(db *pgxpool.Pool, allowedRoles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		circleID := c.Param("id")
+		if userID == "" || circleID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Autentikasi atau circle tidak valid"})
+			return
+		}
+
+		var role string
+		err := db.QueryRow(c.Request.Context(), `
+			SELECT membership_role
+			FROM circle_memberships
+			WHERE circle_id = $1 AND user_id = $2 AND membership_status = 'ACTIVE'`, circleID, userID).Scan(&role)
+		if err != nil {
+			status := http.StatusForbidden
+			message := "Anda bukan anggota aktif circle ini"
+			if err != pgx.ErrNoRows {
+				status = http.StatusInternalServerError
+				message = "Gagal memverifikasi akses circle"
+			}
+			c.AbortWithStatusJSON(status, gin.H{"status": "error", "message": message})
+			return
+		}
+
+		for _, allowedRole := range allowedRoles {
+			if strings.EqualFold(role, allowedRole) {
+				c.Set("circle_role", role)
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": "error", "message": "Role circle tidak memiliki akses untuk aksi ini"})
 	}
 }
 
