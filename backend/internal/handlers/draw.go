@@ -92,6 +92,15 @@ func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	}))
 }
 
+func (h *DrawHandler) CloseBidding(c *gin.Context) {
+	cycleID := normalizeCycleID(c.Param("id"))
+	if err := h.drawService.CloseBidding(c.Request.Context(), cycleID); err != nil {
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", err.Error(), nil))
+		return
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Bidding ditutup dan siklus siap dicairkan", gin.H{"cycle_id": cycleID, "cycle_status": "READY_FOR_DISBURSEMENT"}))
+}
+
 func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 	circleID := c.Param("id")
 
