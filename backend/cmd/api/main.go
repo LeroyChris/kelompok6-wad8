@@ -111,8 +111,8 @@ func main() {
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 
 			// Relasi Siklus
-			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
-			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)
+			circles.GET("/:id/cycles", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCircleCycles)
+			circles.POST("/:id/cycles", middleware.RequireCircleRole(db, "OWNER"), drawHandler.CreateCircleCycle)
 		}
 
 		invitations := v1.Group("/invitations")
@@ -133,13 +133,13 @@ func main() {
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
 		{
-			cycles.GET("/:id", drawHandler.GetCycleDetail)
-			cycles.GET("/:id/participants", drawHandler.GetCycleParticipants)
-			cycles.GET("/:id/obligations", drawHandler.GetCycleObligations)
-			cycles.POST("/:id/bids", drawHandler.SubmitCycleBid)
-			cycles.POST("/:id/bidding/close", drawHandler.CloseBidding)
-			cycles.POST("/:id/draw", drawHandler.ExecuteCycleDraw)
-			cycles.GET("/:id/award", drawHandler.GetCycleAward)
+			cycles.GET("/:id", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleDetail)
+			cycles.GET("/:id/participants", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleParticipants)
+			cycles.GET("/:id/obligations", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleObligations)
+			cycles.POST("/:id/bids", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
+			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
+			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
+			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
 		}
 
 		draws := v1.Group("/draws")

@@ -23,6 +23,8 @@ type DrawService interface {
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
 	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	CloseBidding(ctx context.Context, cycleID string) error
+	GetCyclesByCircle(ctx context.Context, circleID string) ([]repository.CycleDB, error)
+	GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error)
 }
 
 type drawService struct {
@@ -249,4 +251,11 @@ func (s *drawService) StartNewCycle(ctx context.Context, circleID string, cycleN
 
 func (s *drawService) CloseBidding(ctx context.Context, cycleID string) error {
 	return s.repo.CloseBidding(ctx, cycleID)
+}
+
+func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string) ([]repository.CycleDB, error) {
+	return s.repo.GetCyclesByCircle(ctx, circleID)
+}
+func (s *drawService) GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error) {
+	return s.repo.GetCycle(ctx, cycleID)
 }
