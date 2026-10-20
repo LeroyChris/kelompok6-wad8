@@ -283,17 +283,32 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 // GET /api/v1/payments/:id
 func (h *PaymentHandler) GetPaymentDetail(c *gin.Context) {
 	id := c.Param("id")
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
+		return
+	}
 
 	query := `
-		SELECT payment_order_id::text, order_type, payment_method, amount, payment_status, created_at
-		FROM payment_orders
-		WHERE payment_order_id = $1;
+		SELECT po.payment_order_id::text, po.order_type, po.payment_method, po.amount, po.payment_status, po.created_at
+		FROM payment_orders po
+		JOIN obligation_payment_orders opo ON opo.payment_order_id = po.payment_order_id
+		JOIN cycle_obligations co ON co.obligation_id = opo.obligation_id
+		JOIN cycle_participants cp ON cp.cycle_participant_id = co.cycle_participant_id
+		JOIN circle_memberships payer_cm ON payer_cm.circle_membership_id = cp.circle_membership_id
+		JOIN arisan_cycles ac ON ac.cycle_id = cp.cycle_id
+		LEFT JOIN circle_memberships reviewer_cm
+			ON reviewer_cm.circle_id = ac.circle_id
+			AND reviewer_cm.user_id = $2
+			AND reviewer_cm.membership_status = 'ACTIVE'
+		WHERE po.payment_order_id = $1
+		  AND (payer_cm.user_id = $2 OR reviewer_cm.membership_role IN ('OWNER', 'ADMIN'));
 	`
 	var orderID, orderType, paymentMethod, paymentStatus string
 	var amount float64
 	var createdAt time.Time
 
-	err := h.DB.QueryRow(c.Request.Context(), query, id).Scan(
+	err := h.DB.QueryRow(c.Request.Context(), query, id, userID).Scan(
 		&orderID, &orderType, &paymentMethod, &amount, &paymentStatus, &createdAt,
 	)
 	if err != nil {
