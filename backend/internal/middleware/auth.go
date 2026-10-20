@@ -32,10 +32,17 @@ func AuthMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 		jwtSecret := os.Getenv("JWT_SECRET")
 		if jwtSecret == "" {
-			jwtSecret = "supersecretkey-arisankita-wad-kelompok6-ganti-ini"
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"status":  "error",
+				"message": "JWT_SECRET belum dikonfigurasi",
+			})
+			return
 		}
 
 		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok || t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+				return nil, jwt.ErrSignatureInvalid
+			}
 			return []byte(jwtSecret), nil
 		})
 
@@ -48,9 +55,15 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			if userID, exists := claims["user_id"]; exists {
+			if userID, exists := claims["user_id"].(string); exists && userID != "" {
 				c.Set("userID", userID)
 				c.Set("user_id", userID)
+			} else {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"status":  "error",
+					"message": "Token tidak memiliki identitas user",
+				})
+				return
 			}
 			if email, exists := claims["email"]; exists {
 				c.Set("email", email)

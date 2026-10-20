@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -10,6 +14,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	defaultWalletPageSize = 20
+	maximumWalletPageSize = 100
 )
 
 type WalletHandler struct {
@@ -20,76 +29,120 @@ func NewWalletHandler(db *pgxpool.Pool) *WalletHandler {
 	return &WalletHandler{DB: db}
 }
 
-// GetWalletBalance - GET /api/v1/wallet
 func (h *WalletHandler) GetWalletBalance(c *gin.Context) {
-	// Panggil key "user_id" (sesuai AuthMiddleware) dengan fallback ke "userID"
-	userID := c.GetString("user_id")
-	if userID == "" {
-		userID = c.GetString("userID")
-	}
-	if userID == "" {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
 		return
 	}
 
-	ctx := c.Request.Context()
-	query := `SELECT wallet_id::text, user_id::text, balance, updated_at FROM user_wallets WHERE user_id::text = $1 LIMIT 1;`
-
 	var wallet dto.WalletResponse
-	var updatedAtTime time.Time
-	err := h.DB.QueryRow(ctx, query, userID).Scan(
+	var updatedAt time.Time
+	err := h.DB.QueryRow(c.Request.Context(), `
+		SELECT wallet_id::text, user_id::text, balance::float8, updated_at
+		FROM user_wallets
+		WHERE user_id = $1`, userID).Scan(
 		&wallet.WalletID,
 		&wallet.UserID,
 		&wallet.Balance,
-		&updatedAtTime,
+		&updatedAt,
 	)
-
-	// Auto-Create/Fallback jika dompet belum ada di DB
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) || err != nil {
-			wallet.WalletID = "w-auto-" + userID
-			wallet.UserID = userID
-			wallet.Balance = 0.0
-			updatedAtTime = time.Now()
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Wallet user tidak ditemukan", nil))
+			return
 		}
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil saldo wallet", nil))
+		return
 	}
 
-	wallet.UpdatedAt = updatedAtTime.Format(time.RFC3339)
-
+	wallet.UpdatedAt = updatedAt.Format(time.RFC3339)
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Saldo dompet berhasil diambil", wallet))
 }
 
-// GetWalletTransactions - GET /api/v1/wallet/transactions
-func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
-		userID = c.GetString("userID")
+func walletPageSize(raw string) int {
+	if raw == "" {
+		return defaultWalletPageSize
 	}
-	if userID == "" {
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit < 1 {
+		return defaultWalletPageSize
+	}
+	if limit > maximumWalletPageSize {
+		return maximumWalletPageSize
+	}
+	return limit
+}
+
+func decodeWalletCursor(cursor string) (*time.Time, string, error) {
+	if cursor == "" {
+		return nil, "", nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return nil, "", errors.New("cursor tidak valid")
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 2 || parts[1] == "" {
+		return nil, "", errors.New("cursor tidak valid")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return nil, "", errors.New("cursor tidak valid")
+	}
+	return &createdAt, parts[1], nil
+}
+
+func encodeWalletCursor(createdAt time.Time, transactionID string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(createdAt.UTC().Format(time.RFC3339Nano) + "|" + transactionID))
+}
+
+// GetWalletTransactions returns ledger entries ordered newest-first using cursor pagination.
+func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
 		return
 	}
 
-	query := `
-		SELECT wt.wallet_tx_id::text AS id, wt.wallet_id::text, wt.tx_type AS transaction_type, 'CREDIT' AS mutation_type, wt.amount, COALESCE(wt.description, '') AS description, wt.created_at
-		FROM wallet_transactions wt
-		JOIN user_wallets uw ON wt.wallet_id = uw.wallet_id
-		WHERE uw.user_id::text = $1
-		ORDER BY wt.created_at DESC;
-	`
-
-	rows, err := h.DB.Query(c.Request.Context(), query, userID)
+	limit := walletPageSize(c.Query("limit"))
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
 	if err != nil {
-		// Return array kosong jika belum ada transaksi (mencegah error 500)
-		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Riwayat transaksi berhasil diambil", []dto.WalletTransactionItem{}))
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
+		return
+	}
+
+	rows, err := h.DB.Query(c.Request.Context(), `
+		SELECT
+			wt.wallet_tx_id::text,
+			wt.wallet_id::text,
+			wt.tx_type,
+			CASE
+				WHEN wt.tx_type IN ('INITIAL_BALANCE', 'TOPUP', 'DISBURSEMENT') THEN 'CREDIT'
+				ELSE 'DEBIT'
+			END,
+			wt.amount::float8,
+			COALESCE(wt.description, ''),
+			wt.created_at
+		FROM wallet_transactions wt
+		JOIN user_wallets uw ON uw.wallet_id = wt.wallet_id
+		WHERE uw.user_id = $1
+		  AND (
+				$2::timestamptz IS NULL
+				OR (wt.created_at, wt.wallet_tx_id) < ($2::timestamptz, $3::uuid)
+			)
+		ORDER BY wt.created_at DESC, wt.wallet_tx_id DESC
+		LIMIT $4`, userID, cursorTime, nullableString(cursorID), limit+1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil riwayat transaksi", nil))
 		return
 	}
 	defer rows.Close()
 
-	transactions := make([]dto.WalletTransactionItem, 0)
+	transactions := make([]dto.WalletTransactionItem, 0, limit)
 	for rows.Next() {
 		var item dto.WalletTransactionItem
-		var createdAtTime time.Time
+		var createdAt time.Time
 		if err := rows.Scan(
 			&item.ID,
 			&item.WalletID,
@@ -97,30 +150,62 @@ func (h *WalletHandler) GetWalletTransactions(c *gin.Context) {
 			&item.MutationType,
 			&item.Amount,
 			&item.Description,
-			&createdAtTime,
+			&createdAt,
 		); err != nil {
-			continue
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data transaksi wallet tidak valid", nil))
+			return
 		}
-		item.CreatedAt = createdAtTime.Format(time.RFC3339)
+		item.CreatedAt = createdAt.Format(time.RFC3339Nano)
 		transactions = append(transactions, item)
 	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal membaca riwayat transaksi", nil))
+		return
+	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Riwayat transaksi berhasil diambil", transactions))
+	var nextCursor *string
+	if len(transactions) > limit {
+		last := transactions[limit-1]
+		encoded := encodeWalletCursor(mustParseTransactionTime(last.CreatedAt), last.ID)
+		nextCursor = &encoded
+		transactions = transactions[:limit]
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Riwayat transaksi berhasil diambil", gin.H{
+		"items": transactions,
+		"meta": gin.H{
+			"limit":       limit,
+			"next_cursor": nextCursor,
+		},
+	}))
 }
 
-// TopUpWallet - POST /api/v1/wallet/topup
-func (h *WalletHandler) TopUpWallet(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
-		userID = c.GetString("userID")
+func nullableString(value string) any {
+	if value == "" {
+		return nil
 	}
-	if userID == "" {
+	return value
+}
+
+func mustParseTransactionTime(value string) time.Time {
+	parsed, _ := time.Parse(time.RFC3339, value)
+	return parsed
+}
+
+// TopUpWallet is a sandbox-only operation and is recorded in the wallet ledger.
+func (h *WalletHandler) TopUpWallet(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
+		return
+	}
+	if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
+		c.JSON(http.StatusForbidden, dto.BuildResponse(http.StatusForbidden, "error", "Top-up sandbox tidak tersedia di production", nil))
 		return
 	}
 
 	var req dto.TopUpRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Jumlah top-up harus berupa angka positif", nil))
 		return
 	}
@@ -128,41 +213,37 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 	ctx := c.Request.Context()
 	tx, err := h.DB.Begin(ctx)
 	if err != nil {
-		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Top-up saldo sandbox berhasil", gin.H{
-			"wallet_id":    "w-sandbox-" + userID,
-			"topup_amount": req.Amount,
-			"new_balance":  req.Amount,
-		}))
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memulai transaksi top-up", nil))
 		return
 	}
 	defer tx.Rollback(ctx)
 
 	var walletID string
 	var newBalance float64
-
-	upsertQuery := `
-		INSERT INTO user_wallets (user_id, balance, updated_at)
-		VALUES ($2, $1, NOW())
-		ON CONFLICT (user_id)
-		DO UPDATE SET balance = user_wallets.balance + $1, updated_at = NOW()
-		RETURNING wallet_id::text, balance;
-	`
-	err = tx.QueryRow(ctx, upsertQuery, req.Amount, userID).Scan(&walletID, &newBalance)
+	err = tx.QueryRow(ctx, `
+		UPDATE user_wallets
+		SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP
+		WHERE user_id = $2
+		RETURNING wallet_id::text, balance::float8`, req.Amount, userID).Scan(&walletID, &newBalance)
 	if err != nil {
-		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Top-up saldo sandbox berhasil", gin.H{
-			"wallet_id":    "w-sandbox-" + userID,
-			"topup_amount": req.Amount,
-			"new_balance":  req.Amount,
-		}))
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "Wallet user tidak ditemukan", nil))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menambah saldo wallet", nil))
 		return
 	}
 
-	insertQuery := `
-		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, description, created_at)
-		VALUES ($1, $2, 'TOPUP', 'Top-up saldo sandbox testing', NOW());
-	`
-	_, _ = tx.Exec(ctx, insertQuery, walletID, req.Amount)
-	_ = tx.Commit(ctx)
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO wallet_transactions (wallet_id, amount, tx_type, description)
+		VALUES ($1, $2, 'TOPUP', 'Top-up saldo sandbox')`, walletID, req.Amount); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mencatat transaksi top-up", nil))
+		return
+	}
+	if err = tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menyimpan transaksi top-up", nil))
+		return
+	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Top-up saldo sandbox berhasil", gin.H{
 		"wallet_id":    walletID,

@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const defaultSandboxOTP = "123456"
 
 type AuthHandler struct {
 	DB *pgxpool.Pool
@@ -30,21 +32,53 @@ type OTPRequestInput struct {
 type OTPVerifyInput struct {
 	PhoneNumber string `json:"phone_number" binding:"required"`
 	OTPCode     string `json:"otp_code" binding:"required"`
-	InviteCode  string `json:"invite_code,omitempty"`
 }
 
-// ✅ FUNGSI GENERATE TOKEN JWT
+func normalizePhoneNumber(raw string) (string, error) {
+	var digits strings.Builder
+	for _, char := range raw {
+		if char >= '0' && char <= '9' {
+			digits.WriteRune(char)
+		}
+	}
+
+	phone := digits.String()
+	switch {
+	case strings.HasPrefix(phone, "62"):
+		phone = "0" + strings.TrimPrefix(phone, "62")
+	case !strings.HasPrefix(phone, "0"):
+		phone = "0" + phone
+	}
+
+	if len(phone) < 10 || len(phone) > 15 {
+		return "", errors.New("nomor telepon tidak valid")
+	}
+
+	return phone, nil
+}
+
+func sandboxOTPCode() string {
+	if code := os.Getenv("SANDBOX_OTP_CODE"); code != "" {
+		return code
+	}
+	return defaultSandboxOTP
+}
+
+func sandboxEnabled() bool {
+	return !strings.EqualFold(os.Getenv("APP_ENV"), "production")
+}
+
 func generateToken(userID, email string) (string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		jwtSecret = "supersecretkey-arisankita-wad-kelompok6-ganti-ini"
+		return "", errors.New("JWT_SECRET belum dikonfigurasi")
 	}
 
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"email":   email,
 		"role":    "USER",
-		"exp":     time.Now().Add(24 * 7 * time.Hour).Unix(),
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
 		"iat":     time.Now().Unix(),
 	}
 
@@ -52,123 +86,89 @@ func generateToken(userID, email string) (string, error) {
 	return token.SignedString([]byte(jwtSecret))
 }
 
-// POST /api/v1/auth/request-otp
+func (h *AuthHandler) findUserByPhone(ctx *gin.Context, phone string) (userID, fullName, email string, err error) {
+	err = h.DB.QueryRow(ctx.Request.Context(), `
+		SELECT u.user_id::text, u.full_name, COALESCE(u.email, '')
+		FROM user_auth_identities uai
+		JOIN users u ON u.user_id = uai.user_id
+		WHERE uai.provider = 'PHONE_OTP'
+		  AND uai.provider_subject = $1
+		  AND u.account_status = 'ACTIVE'
+		LIMIT 1`, phone).Scan(&userID, &fullName, &email)
+	return userID, fullName, email, err
+}
+
+// RequestOTP issues a sandbox OTP only for a registered active user.
 func (h *AuthHandler) RequestOTP(c *gin.Context) {
 	var input OTPRequestInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nomor WhatsApp wajib diisi: "+err.Error(), nil))
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nomor telepon wajib diisi", nil))
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Kode OTP berhasil dikirim ke WhatsApp", gin.H{
-		"phone_number": input.PhoneNumber,
-		"otp_code":     "123456",
+	phone, err := normalizePhoneNumber(input.PhoneNumber)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
+		return
+	}
+
+	if _, _, _, err := h.findUserByPhone(c, phone); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "User dengan nomor telepon tersebut tidak terdaftar", nil))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memproses permintaan OTP", nil))
+		return
+	}
+
+	payload := gin.H{
+		"phone_number": phone,
 		"expires_in":   300,
-	}))
+	}
+	if sandboxEnabled() {
+		payload["otp_code"] = sandboxOTPCode()
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Kode OTP berhasil dikirim", payload))
 }
 
-// POST /api/v1/auth/verify-otp
+// VerifyOTP authenticates an existing seeded/registered user. It never creates users.
 func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	var input OTPVerifyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Data verifikasi tidak valid: "+err.Error(), nil))
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Data verifikasi tidak valid", nil))
 		return
 	}
 
-	ctx := c.Request.Context()
-	rawPhone := input.PhoneNumber
+	phone, err := normalizePhoneNumber(input.PhoneNumber)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", err.Error(), nil))
+		return
+	}
 
-	// Normalisasi nomor HP untuk pencarian DB yang fleksibel
-	cleanPhone := ""
-	for _, ch := range rawPhone {
-		if ch >= '0' && ch <= '9' {
-			cleanPhone += string(ch)
+	if !sandboxEnabled() {
+		c.JSON(http.StatusServiceUnavailable, dto.BuildResponse(http.StatusServiceUnavailable, "error", "OTP provider belum dikonfigurasi", nil))
+		return
+	}
+	if input.OTPCode != sandboxOTPCode() {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kode OTP tidak valid", nil))
+		return
+	}
+
+	userID, fullName, email, err := h.findUserByPhone(c, phone)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "User dengan nomor telepon tersebut tidak terdaftar", nil))
+			return
 		}
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memverifikasi user", nil))
+		return
 	}
 
-	var alt1, alt2, alt3 string
-	if len(cleanPhone) > 0 && cleanPhone[0] == '0' {
-		alt1 = cleanPhone            // 081234567890
-		alt2 = cleanPhone[1:]        // 81234567890
-		alt3 = "62" + cleanPhone[1:] // 6281234567890
-	} else if len(cleanPhone) >= 2 && cleanPhone[:2] == "62" {
-		alt1 = "0" + cleanPhone[2:] // 081234567890
-		alt2 = cleanPhone[2:]       // 81234567890
-		alt3 = cleanPhone           // 6281234567890
-	} else {
-		alt1 = "0" + cleanPhone
-		alt2 = cleanPhone
-		alt3 = "62" + cleanPhone
-	}
-	alt4 := "+" + alt3 // +6281234567890
-
-	var userID, fullName, email string
-	querySelect := `
-		SELECT user_id, full_name, COALESCE(email, '')
-		FROM users
-		WHERE phone_number = $1 OR phone_number = $2 OR phone_number = $3 OR phone_number = $4
-		LIMIT 1;
-	`
-
-	err := h.DB.QueryRow(ctx, querySelect, alt1, alt2, alt3, alt4).Scan(&userID, &fullName, &email)
-
-	// Auto-Register jika user belum terdaftar
-	if errors.Is(err, pgx.ErrNoRows) {
-		tx, errTx := h.DB.Begin(ctx)
-		if errTx != nil {
-			userID = "usr-demo-" + cleanPhone
-			fullName = "User ArisanKita"
-			email = "user_" + cleanPhone + "@arisankita.id"
-		} else {
-			defer tx.Rollback(ctx)
-
-			suffix := cleanPhone
-			if len(cleanPhone) >= 4 {
-				suffix = cleanPhone[len(cleanPhone)-4:]
-			}
-			fullName = "User " + suffix
-			email = fmt.Sprintf("user_%s@arisankita.id", cleanPhone)
-
-			insertUserSql := `
-				INSERT INTO users (full_name, phone_number, email, account_status)
-				VALUES ($1, $2, $3, 'ACTIVE')
-				RETURNING user_id;
-			`
-			errIns := tx.QueryRow(ctx, insertUserSql, fullName, alt1, email).Scan(&userID)
-			if errIns != nil {
-				_ = tx.Rollback(ctx)
-				userID = "usr-auto-" + cleanPhone
-			} else {
-				_, _ = tx.Exec(ctx, `INSERT INTO user_auth_identities (user_id, provider_type, identifier) VALUES ($1, 'PHONE_OTP', $2) ON CONFLICT DO NOTHING;`, userID, alt1)
-				_, _ = tx.Exec(ctx, `INSERT INTO user_wallets (user_id, balance) VALUES ($1, 0.00) ON CONFLICT DO NOTHING;`, userID)
-				_ = tx.Commit(ctx)
-			}
-		}
-	} else if err != nil {
-		userID = "usr-fallback-" + cleanPhone
-		fullName = "User ArisanKita"
-		email = "user_" + cleanPhone + "@arisankita.id"
-	}
-
-	// Auto-Join Circle jika ada Invite Code
-	if input.InviteCode != "" && userID != "" {
-		var circleID string
-		checkInviteSql := `SELECT circle_id FROM circle_invitations WHERE invite_code = $1 AND invitation_status = 'ACTIVE' LIMIT 1;`
-		errInvite := h.DB.QueryRow(ctx, checkInviteSql, input.InviteCode).Scan(&circleID)
-		if errInvite == nil && circleID != "" {
-			insertMemberSql := `
-				INSERT INTO circle_memberships (circle_id, user_id, membership_role, membership_status)
-				VALUES ($1, $2, 'MEMBER', 'ACTIVE')
-				ON CONFLICT DO NOTHING;
-			`
-			_, _ = h.DB.Exec(ctx, insertMemberSql, circleID, userID)
-		}
-	}
-
-	// Terbitkan Token JWT menggunakan fungsi generateToken
-	token, errToken := generateToken(userID, email)
-	if errToken != nil {
-		token = "mock-jwt-token-arisankita-" + userID
+	token, err := generateToken(userID, email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal membuat token autentikasi", nil))
+		return
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Verifikasi OTP berhasil", gin.H{
@@ -176,7 +176,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		"user": gin.H{
 			"user_id":      userID,
 			"full_name":    fullName,
-			"phone_number": input.PhoneNumber,
+			"phone_number": phone,
 			"email":        email,
 		},
 	}))

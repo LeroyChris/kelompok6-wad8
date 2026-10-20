@@ -204,12 +204,13 @@ func (r *userRepository) TopUpBalanceSandbox(ctx context.Context, userID string,
 	return nil
 }
 
-// 1.2 Registrasi Identitas / OTP Mock
-func (r *userRepository) CreateAuthIdentity(ctx context.Context, userID, identityType, identifier string) error {
+// 1.2 Simpan identitas autentikasi yang sesuai dengan schema user_auth_identities.
+func (r *userRepository) CreateAuthIdentity(ctx context.Context, userID, provider, providerSubject string) error {
 	query := `
-		INSERT INTO user_auth_identities (user_id, identity_type, identifier)
-		VALUES ($1, $2, $3);
+		INSERT INTO user_auth_identities (user_id, provider, provider_subject)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (provider, provider_subject) DO NOTHING;
 	`
-	_, err := r.db.Exec(ctx, query, userID, identityType, identifier)
+	_, err := r.db.Exec(ctx, query, userID, provider, providerSubject)
 	return err
 }

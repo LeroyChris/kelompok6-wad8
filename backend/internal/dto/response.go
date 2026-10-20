@@ -45,12 +45,15 @@ type UserProfileResponse struct {
 }
 
 type WinHistoryItem struct {
-	WinnerID      string  `json:"winner_id"`
-	CircleID      string  `json:"circle_id"`
-	CircleName    string  `json:"circle_name"`
-	RoundNumber   int     `json:"round_number"`
-	AwardedAmount float64 `json:"awarded_amount"`
-	WonAt         string  `json:"won_at"`
+	AwardID               string   `json:"award_id"`
+	CircleID              string   `json:"circle_id"`
+	CircleName            string   `json:"circle_name"`
+	RoundNumber           int      `json:"round_number"`
+	AwardMethod           string   `json:"award_method"`
+	AwardedAmount         float64  `json:"awarded_amount"`
+	WinningBidRatePercent *float64 `json:"winning_bid_rate_percent,omitempty"`
+	PayableBidRatePercent *float64 `json:"payable_bid_rate_percent,omitempty"`
+	WonAt                 string   `json:"won_at"`
 }
 
 type ReputationResponse struct {
