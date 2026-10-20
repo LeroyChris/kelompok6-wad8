@@ -25,6 +25,8 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/003_seed_demo_data.sql
 
 `001_schema_v2.sql` adalah baseline schema, `002_core_hardening.sql` menguatkan invariant core dan pagination, sedangkan `003_seed_demo_data.sql` hanya untuk demo. Lihat [`migrations/README.md`](./migrations/README.md) untuk urutan lengkap dan peringatan reset. Product/API contract resmi tersedia di [`../prd.md`](../prd.md).
 
+Panduan login, akun seed, dan curl endpoint demo tersedia di [`docs/API_DEMO.md`](./docs/API_DEMO.md).
+
 ### 3. Menjalankan Backend Lokal
 ```bash
 cd backend
