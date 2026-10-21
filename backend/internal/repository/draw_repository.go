@@ -85,6 +85,7 @@ type CycleDB struct {
 	DueAt          time.Time  `json:"due_at"`
 	BiddingOpenAt  *time.Time `json:"bidding_open_at,omitempty"`
 	BiddingCloseAt *time.Time `json:"bidding_close_at,omitempty"`
+	CreatedAt      time.Time  `json:"-"`
 }
 
 type DrawRepository interface {
@@ -102,7 +103,7 @@ type DrawRepository interface {
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
 	CloseBidding(ctx context.Context, cycleID string) error
-	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error)
+	GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*CycleDB, error)
 	GetDrawProof(ctx context.Context, cycleID string) (*DrawProofDB, error)
 }
@@ -549,8 +550,14 @@ func (r *drawRepo) CloseBidding(ctx context.Context, cycleID string) error {
 	return nil
 }
 
-func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error) {
-	rows, err := r.db.Query(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE circle_id=$1 AND ($2=0 OR cycle_number < $2) ORDER BY cycle_number DESC LIMIT $3`, circleID, cursor, limit)
+func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]CycleDB, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at,created_at
+		FROM arisan_cycles
+		WHERE circle_id=$1
+		  AND ($2::timestamptz IS NULL OR (created_at, cycle_id) < ($2::timestamptz, $3::uuid))
+		ORDER BY created_at DESC, cycle_id DESC
+		LIMIT $4`, circleID, cursorTime, nullableCursorID(cursorID), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -558,7 +565,7 @@ func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit
 	items := make([]CycleDB, 0)
 	for rows.Next() {
 		var item CycleDB
-		if err := rows.Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt); err != nil {
+		if err := rows.Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

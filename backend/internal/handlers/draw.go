@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -156,19 +155,20 @@ func (h *DrawHandler) CreateCircleCycle(c *gin.Context) {
 func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 	circleID := c.Param("id")
 	limit := circleLimit(c)
-	cursor, err := strconv.Atoi(c.DefaultQuery("cursor", "0"))
-	if err != nil || cursor < 0 {
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
 		return
 	}
-	cycles, err := h.drawService.GetCyclesByCircle(c.Request.Context(), circleID, limit+1, cursor)
+	cycles, err := h.drawService.GetCyclesByCircle(c.Request.Context(), circleID, limit+1, cursorTime, cursorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil siklus", nil))
 		return
 	}
 	var nextCursor any
 	if len(cycles) > limit {
-		nextCursor = cycles[limit-1].CycleNumber
+		last := cycles[limit-1]
+		nextCursor = encodeWalletCursor(last.CreatedAt, last.CycleID)
 		cycles = cycles[:limit]
 	}
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil siklus arisan", gin.H{"items": cycles, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))

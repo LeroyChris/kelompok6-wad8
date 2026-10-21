@@ -66,7 +66,7 @@ func (s *drawRepoStub) OpenCycleWithParticipantsAndObligations(context.Context, 
 }
 func (s *drawRepoStub) GetPaidPot(context.Context, string) (float64, error) { return s.paidPot, nil }
 func (s *drawRepoStub) CloseBidding(context.Context, string) error          { return nil }
-func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, int) ([]repository.CycleDB, error) {
+func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, *time.Time, string) ([]repository.CycleDB, error) {
 	return nil, nil
 }
 

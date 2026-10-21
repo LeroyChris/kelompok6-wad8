@@ -24,7 +24,7 @@ type DrawService interface {
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
 	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	CloseBidding(ctx context.Context, cycleID string) error
-	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]repository.CycleDB, error)
+	GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error)
 	GetUserBid(ctx context.Context, cycleID, userID string) (*repository.BidEntry, error)
 	GetDrawProof(ctx context.Context, cycleID string) (*repository.DrawProofDB, error)
@@ -279,8 +279,8 @@ func (s *drawService) CloseBidding(ctx context.Context, cycleID string) error {
 	return s.repo.CloseBidding(ctx, cycleID)
 }
 
-func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]repository.CycleDB, error) {
-	return s.repo.GetCyclesByCircle(ctx, circleID, limit, cursor)
+func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.CycleDB, error) {
+	return s.repo.GetCyclesByCircle(ctx, circleID, limit, cursorTime, cursorID)
 }
 func (s *drawService) GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error) {
 	return s.repo.GetCycle(ctx, cycleID)
