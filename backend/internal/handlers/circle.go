@@ -466,6 +466,12 @@ func (h *CircleHandler) LeaveCircle(c *gin.Context) {
 
 // GetCircleMembers mengambil daftar anggota terdaftar di Circle
 func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
 	rows, err := h.DB.Query(c.Request.Context(), `
 		SELECT 
 			cm.circle_membership_id::text,
@@ -474,25 +480,34 @@ func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
 			COALESCE(u.email, '') AS email,
 			cm.membership_role,
 			cm.membership_status,
-			cm.joined_at 
+			cm.joined_at, cm.created_at
 		FROM circle_memberships cm 
 		JOIN users u ON u.user_id = cm.user_id 
-		WHERE cm.circle_id = $1 
-		ORDER BY cm.joined_at ASC NULLS LAST, cm.circle_membership_id ASC 
-		LIMIT $2`, c.Param("id"), circleLimit(c))
+		WHERE cm.circle_id = $1
+		  AND ($2::timestamptz IS NULL OR (cm.created_at, cm.circle_membership_id) < ($2::timestamptz, $3::uuid))
+		ORDER BY cm.created_at DESC, cm.circle_membership_id DESC
+		LIMIT $4`, c.Param("id"), cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil daftar anggota", nil))
 		return
 	}
 	defer rows.Close()
 
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	var nextCursor any
+	var lastCreatedAt time.Time
+	var lastID string
 	for rows.Next() {
 		var mid, uid, name, email, role, status string
 		var joined *time.Time
-		if err := rows.Scan(&mid, &uid, &name, &email, &role, &status, &joined); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&mid, &uid, &name, &email, &role, &status, &joined, &createdAt); err != nil {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data anggota tidak valid", nil))
 			return
+		}
+		if len(items) == limit {
+			nextCursor = encodeWalletCursor(lastCreatedAt, lastID)
+			break
 		}
 		items = append(items, gin.H{
 			"circle_membership_id": mid,
@@ -503,11 +518,12 @@ func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
 			"membership_status":    status,
 			"joined_at":            joined,
 		})
+		lastCreatedAt, lastID = createdAt, mid
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar anggota berhasil diambil", gin.H{
 		"items": items,
-		"meta":  gin.H{"limit": circleLimit(c)},
+		"meta":  gin.H{"limit": limit, "next_cursor": nextCursor},
 	}))
 }
 
@@ -598,19 +614,29 @@ func (h *CircleHandler) CreateInvitation(c *gin.Context) {
 // GetInvitations lists invitations for an owner or admin. The route's RBAC
 // middleware verifies the caller before this handler is entered.
 func (h *CircleHandler) GetInvitations(c *gin.Context) {
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
 	rows, err := h.DB.Query(c.Request.Context(), `
 		SELECT invitation_id::text, invite_code, invitation_status, expires_at,
 			accepted_by_user_id::text, accepted_at, created_at
 		FROM circle_invitations
 		WHERE circle_id=$1
+		  AND ($2::timestamptz IS NULL OR (created_at, invitation_id) < ($2::timestamptz, $3::uuid))
 		ORDER BY created_at DESC, invitation_id DESC
-		LIMIT $2`, c.Param("id"), circleLimit(c))
+		LIMIT $4`, c.Param("id"), cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil undangan", nil))
 		return
 	}
 	defer rows.Close()
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	var nextCursor any
+	var lastCreatedAt time.Time
+	var lastID string
 	for rows.Next() {
 		var id, code, status string
 		var expiresAt, createdAt time.Time
@@ -620,9 +646,14 @@ func (h *CircleHandler) GetInvitations(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data undangan tidak valid", nil))
 			return
 		}
+		if len(items) == limit {
+			nextCursor = encodeWalletCursor(lastCreatedAt, lastID)
+			break
+		}
 		items = append(items, gin.H{"invitation_id": id, "invite_code": code, "invitation_status": status, "expires_at": expiresAt, "accepted_by_user_id": acceptedBy, "accepted_at": acceptedAt, "created_at": createdAt})
+		lastCreatedAt, lastID = createdAt, id
 	}
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar undangan berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": circleLimit(c)}}))
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar undangan berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
 
 // UpdateMember memperbarui role atau status anggota
