@@ -7,8 +7,8 @@ import (
 // PaymentOrder merepresentasikan order pembayaran di tabel payment_orders
 type PaymentOrder struct {
 	PaymentOrderID   string     `json:"payment_order_id"`
-	OrderType        string     `json:"order_type"`     // CYCLE_CONTRIBUTION, CAMPAIGN_CONTRIBUTION, LOAN_REPAYMENT
-	PaymentMethod    string     `json:"payment_method"` // GATEWAY, MANUAL_TRANSFER, E_WALLET
+	OrderType        string     `json:"order_type"`     // CYCLE_CONTRIBUTION
+	PaymentMethod    string     `json:"payment_method"` // WALLET, MANUAL_TRANSFER
 	Provider         *string    `json:"provider,omitempty"`
 	ProviderOrderRef *string    `json:"provider_order_ref,omitempty"`
 	IdempotencyKey   *string    `json:"idempotency_key,omitempty"`

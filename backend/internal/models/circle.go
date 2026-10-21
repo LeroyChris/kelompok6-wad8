@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// Circle merepresentasikan entitas tabel circles (001_core_schema.sql & 003_extended_schema.sql)
+// Circle merepresentasikan entitas tabel circles (001_schema_v2.sql)
 type Circle struct {
 	CircleID                            string     `json:"circle_id"`
 	CircleName                          string     `json:"circle_name"`
@@ -15,7 +15,6 @@ type Circle struct {
 	BidFloorPercent                     *float64   `json:"bid_floor_percent,omitempty"`
 	BidCeilingPercent                   *float64   `json:"bid_ceiling_percent,omitempty"`
 	PartialDisbursementThresholdPercent float64    `json:"partial_disbursement_threshold_percent"`
-	KycThresholdAmount                  float64    `json:"kyc_threshold_amount"`
 	StartsAt                            *time.Time `json:"starts_at,omitempty"`
 	CreatedAt                           time.Time  `json:"created_at"`
 	UpdatedAt                           time.Time  `json:"updated_at"`
