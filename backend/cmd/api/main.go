@@ -24,9 +24,10 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS Setup untuk Frontend React Vite (localhost:5173)
+	// CORS origins are configured per environment. Local Vite origins remain
+	// the development default when CORS_ALLOWED_ORIGINS is not set.
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOrigins = []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+	corsConfig.AllowOrigins = allowedCORSOrigins()
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Idempotency-Key"}
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	corsConfig.AllowCredentials = true
