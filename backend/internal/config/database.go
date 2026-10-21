@@ -17,8 +17,7 @@ func InitDB() *pgxpool.Pool {
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Println("[WARN] DATABASE_URL tidak ditemukan di environment. Menggunakan fallback lokal.")
-		dbURL = "postgres://postgres:postgres@localhost:5432/arisankita_db?sslmode=disable"
+		log.Fatal("[FATAL] DATABASE_URL wajib dikonfigurasi")
 	}
 
 	config, err := pgxpool.ParseConfig(dbURL)
