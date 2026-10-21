@@ -24,11 +24,12 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS is explicit to prevent arbitrary websites from using authenticated APIs.
+	// CORS Setup untuk Frontend React Vite (localhost:5173)
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOrigins = allowedCORSOrigins()
+	corsConfig.AllowOrigins = []string{"http://localhost:5173", "http://127.0.0.1:5173"}
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
-	corsConfig.AllowMethods = []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	corsConfig.AllowCredentials = true
 	r.Use(cors.New(corsConfig))
 
 	// Inisialisasi Layer Repositories & Services
@@ -62,13 +63,13 @@ func main() {
 	{
 		v1.GET("/health", healthHandler)
 
-		// Autentikasi & Identitas
+		// Autentikasi & Identitas (Email OTP Self-Registration / Login)
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/otp/request", authHandler.RequestOTP)
-			auth.POST("/otp/verify", authHandler.VerifyOTP)
-			auth.POST("/request-otp", authHandler.RequestOTP)
-			auth.POST("/verify-otp", authHandler.VerifyOTP)
+			auth.POST("/email/request-otp", authHandler.RequestEmailOTP)
+			auth.POST("/email/verify-otp", authHandler.VerifyEmailOTP)
+			auth.POST("/request-otp", authHandler.RequestEmailOTP)
+			auth.POST("/verify-otp", authHandler.VerifyEmailOTP)
 		}
 
 		users := v1.Group("/users")
@@ -107,13 +108,14 @@ func main() {
 			circles.POST("/join", circleHandler.JoinCircle)
 			circles.GET("", circleHandler.GetCircles)
 			circles.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleDetail)
-			circles.PATCH("/:id", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateCircle)
+			circles.POST("/:id/leave", circleHandler.LeaveCircle) // FIX RUTE KELUAR CIRCLE
 			circles.POST("/:id/lock", middleware.RequireCircleRole(db, "OWNER"), circleHandler.LockCircle)
 			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
 			circles.GET("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.GetInvitations)
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 			circles.GET("/:id/payment-matrix", paymentHandler.GetPaymentMatrix)
+
 			// Relasi Siklus
 			circles.GET("/:id/cycles", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCircleCycles)
 			circles.POST("/:id/cycles", middleware.RequireCircleRole(db, "OWNER"), drawHandler.CreateCircleCycle)

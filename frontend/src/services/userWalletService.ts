@@ -1,25 +1,19 @@
-import API from './api';
+import apiClient from './api';
 
 export const userWalletService = {
-  // 1. Auth & OTP
-  requestOTP: (phone_number: string) => 
-    API.post('/auth/request-otp', { phone_number }),
-  verifyOTP: (phone_number: string, otp_code: string) =>
-    API.post('/auth/verify-otp', { phone_number, otp_code }),
+  // Profil & Reputasi User
+  getProfile: () => apiClient.get('/users/me'),
+  updateProfile: (fullName: string) => apiClient.patch('/users/me', { full_name: fullName }),
+  getReputation: () => apiClient.get('/users/me/reputation'),
 
-  // 2. User Profile & Reputation
-  getProfile: () => API.get('/users/me'),
-  updateProfile: (fullName: string) => API.patch('/users/me', { full_name: fullName }),
-  getReputation: () => API.get('/users/me/reputation'),
+  // Dompet Digital Internal
+  getWalletBalance: () => apiClient.get('/wallet'),
+  getTransactions: () => apiClient.get('/wallet/transactions'),
+  topUpWallet: (amount: number) => apiClient.post('/wallet/topup', { amount }),
 
-  // 3. Wallet
-  getWalletBalance: () => API.get('/wallet'),
-  getTransactions: () => API.get('/wallet/transactions'),
-  topUpWallet: (amount: number) => API.post('/wallet/topup', { amount }),
-
-  // 4. Bank Accounts (CRUD)
-  getBankAccounts: () => API.get('/bank-accounts'),
+  // Rekening Bank
+  getBankAccounts: () => apiClient.get('/bank-accounts'),
   addBankAccount: (data: { bank_name: string; account_number: string; account_holder: string; is_primary: boolean }) =>
-    API.post('/bank-accounts', data),
-  deleteBankAccount: (id: string) => API.delete(`/bank-accounts/${id}`),
+    apiClient.post('/bank-accounts', data),
+  deleteBankAccount: (id: string) => apiClient.delete(`/bank-accounts/${id}`),
 };
