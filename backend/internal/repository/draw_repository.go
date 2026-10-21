@@ -11,23 +11,26 @@ import (
 )
 
 type ParticipantDB struct {
-	ParticipantID string `json:"participant_id"`
-	UserID        string `json:"user_id"`
-	Name          string `json:"name"`
-	Initials      string `json:"initials"`
-	Status        string `json:"status"`
+	ParticipantID string    `json:"participant_id"`
+	UserID        string    `json:"user_id"`
+	Name          string    `json:"name"`
+	Initials      string    `json:"initials"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"-"`
 }
 
 type CircleCycleInfo struct {
-	CircleID           string   `json:"circle_id"`
-	CircleName         string   `json:"circle_name"`
-	TrackType          string   `json:"track_type"`
-	ContributionAmount float64  `json:"contribution_amount"`
-	MemberLimit        int      `json:"member_limit"`
-	BidFloorPercent    *float64 `json:"bid_floor_percent"`
-	BidCeilingPercent  *float64 `json:"bid_ceiling_percent"`
-	CycleNumber        int      `json:"cycle_number"`
-	CycleStatus        string   `json:"cycle_status"`
+	CircleID           string     `json:"circle_id"`
+	CircleName         string     `json:"circle_name"`
+	TrackType          string     `json:"track_type"`
+	ContributionAmount float64    `json:"contribution_amount"`
+	MemberLimit        int        `json:"member_limit"`
+	BidFloorPercent    *float64   `json:"bid_floor_percent"`
+	BidCeilingPercent  *float64   `json:"bid_ceiling_percent"`
+	CycleNumber        int        `json:"cycle_number"`
+	CycleStatus        string     `json:"cycle_status"`
+	BiddingOpenAt      *time.Time `json:"bidding_open_at"`
+	BiddingCloseAt     *time.Time `json:"bidding_close_at"`
 }
 
 type BidEntry struct {
@@ -82,23 +85,25 @@ type CycleDB struct {
 	DueAt          time.Time  `json:"due_at"`
 	BiddingOpenAt  *time.Time `json:"bidding_open_at,omitempty"`
 	BiddingCloseAt *time.Time `json:"bidding_close_at,omitempty"`
+	CreatedAt      time.Time  `json:"-"`
 }
 
 type DrawRepository interface {
 	GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error)
+	GetCycleParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ParticipantDB, error)
 	GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error)
 	GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error)
 	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
 	GetUserBid(ctx context.Context, cycleID, userID string) (*BidEntry, error)
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
-	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
-	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
+	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID, actorUserID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
+	ExecuteRandomDrawTransaction(ctx context.Context, cycleID, actorUserID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
 	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error)
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	GetPaidPot(ctx context.Context, cycleID string) (float64, error)
 	CloseBidding(ctx context.Context, cycleID string) error
-	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error)
+	GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*CycleDB, error)
 	GetDrawProof(ctx context.Context, cycleID string) (*DrawProofDB, error)
 }
@@ -126,7 +131,8 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 			cp.cycle_participant_id,
 			COALESCE(cm.user_id::text, '00000000-0000-0000-0000-000000000000'),
 			COALESCE(u.full_name, 'Anggota'),
-			cp.participation_status
+			cp.participation_status,
+			cp.created_at
 		FROM cycle_participants cp
 		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
 		LEFT JOIN users u ON cm.user_id = u.user_id
@@ -144,7 +150,7 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	for rows.Next() {
 		var p ParticipantDB
 		var fullName string
-		if err := rows.Scan(&p.ParticipantID, &p.UserID, &fullName, &p.Status); err != nil {
+		if err := rows.Scan(&p.ParticipantID, &p.UserID, &fullName, &p.Status, &p.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		p.Name = fullName
@@ -157,6 +163,46 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	}
 
 	return list, total, nil
+}
+
+func (r *drawRepo) GetCycleParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ParticipantDB, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT cp.cycle_participant_id::text, cm.user_id::text, u.full_name,
+			cp.participation_status, cp.created_at
+		FROM cycle_participants cp
+		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
+		JOIN users u ON u.user_id=cm.user_id
+		WHERE cp.cycle_id=$1
+		  AND ($2::timestamptz IS NULL OR (cp.created_at, cp.cycle_participant_id) > ($2::timestamptz, $3::uuid))
+		ORDER BY cp.created_at ASC, cp.cycle_participant_id ASC
+		LIMIT $4`, cycleID, cursorTime, nullableCursorID(cursorID), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch participants: %w", err)
+	}
+	defer rows.Close()
+	items := make([]ParticipantDB, 0, limit)
+	for rows.Next() {
+		var participant ParticipantDB
+		var fullName string
+		if err := rows.Scan(&participant.ParticipantID, &participant.UserID, &fullName, &participant.Status, &participant.CreatedAt); err != nil {
+			return nil, err
+		}
+		participant.Name = fullName
+		if len(fullName) >= 2 {
+			participant.Initials = string(fullName[0]) + string(fullName[1])
+		} else {
+			participant.Initials = fullName
+		}
+		items = append(items, participant)
+	}
+	return items, rows.Err()
+}
+
+func nullableCursorID(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error) {
@@ -216,7 +262,9 @@ func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*C
 			c.bid_floor_percent,
 			c.bid_ceiling_percent,
 			ac.cycle_number,
-			ac.cycle_status
+			ac.cycle_status,
+			ac.bidding_open_at,
+			ac.bidding_close_at
 		FROM arisan_cycles ac
 		JOIN circles c ON c.circle_id = ac.circle_id
 		WHERE ac.cycle_id = $1;
@@ -232,6 +280,8 @@ func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*C
 		&info.BidCeilingPercent,
 		&info.CycleNumber,
 		&info.CycleStatus,
+		&info.BiddingOpenAt,
+		&info.BiddingCloseAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -318,6 +368,7 @@ func (r *drawRepo) GetUserBid(ctx context.Context, cycleID, userID string) (*Bid
 func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	winner BidEntry,
 	winningRate, payableRate, grossAmount, netAmount float64,
 	decisionHash string,
@@ -327,6 +378,9 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.actor_user_id', $1, true)`, actorUserID); err != nil {
+		return "", fmt.Errorf("failed to set audit actor: %w", err)
+	}
 
 	var awardID string
 	insertAwardQuery := `
@@ -346,7 +400,7 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		INSERT INTO disbursements (
 			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
 		)
-		VALUES ($1, 'IN_APP_WALLET', $2, 0.00, $3, 'PAID', NOW(), NOW());
+		VALUES ($1, 'IN_APP_WALLET', $2, ($2::numeric - $3::numeric), $3, 'PAID', NOW(), NOW());
 	`
 	if _, err := tx.Exec(ctx, insertDisbursementQuery, awardID, grossAmount, netAmount); err != nil {
 		return "", fmt.Errorf("failed to record disbursement: %w", err)
@@ -389,6 +443,7 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 func (r *drawRepo) ExecuteRandomDrawTransaction(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	winner ParticipantDB,
 	grossAmount float64,
 	decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int,
@@ -398,6 +453,9 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.actor_user_id', $1, true)`, actorUserID); err != nil {
+		return "", fmt.Errorf("failed to set audit actor: %w", err)
+	}
 
 	var awardID string
 	insertAwardQuery := `
@@ -492,8 +550,14 @@ func (r *drawRepo) CloseBidding(ctx context.Context, cycleID string) error {
 	return nil
 }
 
-func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]CycleDB, error) {
-	rows, err := r.db.Query(ctx, `SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at FROM arisan_cycles WHERE circle_id=$1 AND ($2=0 OR cycle_number < $2) ORDER BY cycle_number DESC LIMIT $3`, circleID, cursor, limit)
+func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]CycleDB, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT cycle_id::text,circle_id::text,cycle_number,cycle_status,due_at,bidding_open_at,bidding_close_at,created_at
+		FROM arisan_cycles
+		WHERE circle_id=$1
+		  AND ($2::timestamptz IS NULL OR (created_at, cycle_id) < ($2::timestamptz, $3::uuid))
+		ORDER BY created_at DESC, cycle_id DESC
+		LIMIT $4`, circleID, cursorTime, nullableCursorID(cursorID), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -501,7 +565,7 @@ func (r *drawRepo) GetCyclesByCircle(ctx context.Context, circleID string, limit
 	items := make([]CycleDB, 0)
 	for rows.Next() {
 		var item CycleDB
-		if err := rows.Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt); err != nil {
+		if err := rows.Scan(&item.CycleID, &item.CircleID, &item.CycleNumber, &item.CycleStatus, &item.DueAt, &item.BiddingOpenAt, &item.BiddingCloseAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -629,6 +693,26 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	var circleStatus string
+	var expectedCycleNumber int
+	err = tx.QueryRow(ctx, `
+		SELECT c.circle_status,
+			(SELECT COALESCE(MAX(ac.cycle_number), 0) + 1 FROM arisan_cycles ac WHERE ac.circle_id=c.circle_id)
+		FROM circles c
+		WHERE c.circle_id=$1
+		FOR UPDATE`, circleID).Scan(&circleStatus, &expectedCycleNumber)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errors.New("circle tidak ditemukan")
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to lock circle: %w", err)
+	}
+	if circleStatus != "LOCKED" && circleStatus != "RUNNING" {
+		return "", errors.New("circle harus LOCKED atau RUNNING sebelum cycle dibuat")
+	}
+	if cycleNumber != expectedCycleNumber {
+		return "", fmt.Errorf("cycle_number harus %d", expectedCycleNumber)
+	}
 
 	var cycleID string
 	insertCycleQuery := `
@@ -670,6 +754,9 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 	`
 	if _, err := tx.Exec(ctx, insertObligationsQuery, cycleID, dueAt); err != nil {
 		return "", fmt.Errorf("failed to generate cycle obligations: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE circles SET circle_status='RUNNING' WHERE circle_id=$1 AND circle_status='LOCKED'`, circleID); err != nil {
+		return "", fmt.Errorf("failed to start circle: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -17,13 +17,14 @@ import (
 
 type DrawService interface {
 	GetParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]repository.ParticipantDB, dto.MetaPagination, error)
-	ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error)
+	GetParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ParticipantDB, error)
+	ExecuteCycleDraw(ctx context.Context, cycleID, actorUserID string) (map[string]interface{}, error)
 	SubmitBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
 	StartNewCycle(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
 	CloseBidding(ctx context.Context, cycleID string) error
-	GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]repository.CycleDB, error)
+	GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.CycleDB, error)
 	GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error)
 	GetUserBid(ctx context.Context, cycleID, userID string) (*repository.BidEntry, error)
 	GetDrawProof(ctx context.Context, cycleID string) (*repository.DrawProofDB, error)
@@ -65,14 +66,32 @@ func (s *drawService) GetParticipantsPaginated(ctx context.Context, cycleID stri
 	return data, meta, nil
 }
 
+func (s *drawService) GetParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ParticipantDB, error) {
+	return s.repo.GetCycleParticipantsCursor(ctx, cycleID, limit, cursorTime, cursorID)
+}
+
 // Eksekusi Pemenang Siklus (Smart Routing: SPSB Auction atau Random Draw)
-func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error) {
+func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID, actorUserID string) (map[string]interface{}, error) {
 	// 1. Ambil data Circle & Siklus
 	info, err := s.repo.GetCircleInfoByCycle(ctx, cycleID)
 	if err != nil {
 		return nil, err
 	}
 
+	if info.CycleStatus == "COMPLETED" || info.CycleStatus == "DISBURSED" {
+		existing, existingErr := s.repo.GetCycleAward(ctx, cycleID)
+		if existingErr != nil {
+			return nil, existingErr
+		}
+		if existing != nil {
+			return map[string]interface{}{
+				"award_id": existing.AwardID, "cycle_id": existing.CycleID,
+				"winner_user_id": existing.WinnerUserID, "winner_name": existing.WinnerName,
+				"award_method": existing.AwardMethod, "gross_amount": existing.GrossAmount,
+				"decision_hash": existing.DecisionHash, "idempotent_replay": true,
+			}, nil
+		}
+	}
 	if info.CycleStatus != "READY_FOR_DISBURSEMENT" {
 		return nil, errors.New("siklus harus berstatus READY_FOR_DISBURSEMENT sebelum pemenang dapat ditetapkan")
 	}
@@ -87,16 +106,17 @@ func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map
 
 	// 2. Cabang Logika Berdasarkan Track Type
 	if info.TrackType == "SPSB" {
-		return s.executeSPSBVickreyDraw(ctx, cycleID, info, grossAmount)
+		return s.executeSPSBVickreyDraw(ctx, cycleID, actorUserID, info, grossAmount)
 	}
 
-	return s.executeProvablyFairRandomDraw(ctx, cycleID, info, grossAmount)
+	return s.executeProvablyFairRandomDraw(ctx, cycleID, actorUserID, info, grossAmount)
 }
 
 // Logika Lelang SPSB (Second Price Sealed Bid / Vickrey Auction)
 func (s *drawService) executeSPSBVickreyDraw(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	info *repository.CircleCycleInfo,
 	grossAmount float64,
 ) (map[string]interface{}, error) {
@@ -130,7 +150,7 @@ func (s *drawService) executeSPSBVickreyDraw(
 
 	// Eksekusi Transaksi Atomis (Simpan Award, Catat Pencairan, Kredit Dompet)
 	awardID, err := s.repo.ExecuteSPSBDrawTransaction(
-		ctx, cycleID, winner, winningRate, payableRate, grossAmount, netAmount, decisionHash,
+		ctx, cycleID, actorUserID, winner, winningRate, payableRate, grossAmount, netAmount, decisionHash,
 	)
 	if err != nil {
 		return nil, err
@@ -156,6 +176,7 @@ func (s *drawService) executeSPSBVickreyDraw(
 func (s *drawService) executeProvablyFairRandomDraw(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	info *repository.CircleCycleInfo,
 	grossAmount float64,
 ) (map[string]interface{}, error) {
@@ -190,7 +211,7 @@ func (s *drawService) executeProvablyFairRandomDraw(
 
 	// Eksekusi Transaksi Atomis (Simpan Award, Audit Trail, Pencairan ke Dompet Pemenang)
 	awardID, err := s.repo.ExecuteRandomDrawTransaction(
-		ctx, cycleID, winner, grossAmount, decisionHash, seedCommitment, hex.EncodeToString(seedBytes), hex.EncodeToString(snapshot[:]), len(candidates),
+		ctx, cycleID, actorUserID, winner, grossAmount, decisionHash, seedCommitment, hex.EncodeToString(seedBytes), hex.EncodeToString(snapshot[:]), len(candidates),
 	)
 	if err != nil {
 		return nil, err
@@ -228,6 +249,9 @@ func (s *drawService) SubmitBid(ctx context.Context, cycleID, userID string, bid
 	if info.CycleStatus != "BIDDING_OPEN" {
 		return errors.New("bidding tidak sedang dibuka untuk siklus ini")
 	}
+	if info.BiddingOpenAt == nil || info.BiddingCloseAt == nil || time.Now().Before(*info.BiddingOpenAt) || !time.Now().Before(*info.BiddingCloseAt) {
+		return errors.New("window bidding tidak aktif untuk siklus ini")
+	}
 
 	if info.BidFloorPercent != nil && bidRate < *info.BidFloorPercent {
 		return fmt.Errorf("tawaran minimal adalah %.2f%% sesuai batas bawah (bid floor) kelompok", *info.BidFloorPercent)
@@ -255,8 +279,8 @@ func (s *drawService) CloseBidding(ctx context.Context, cycleID string) error {
 	return s.repo.CloseBidding(ctx, cycleID)
 }
 
-func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string, limit, cursor int) ([]repository.CycleDB, error) {
-	return s.repo.GetCyclesByCircle(ctx, circleID, limit, cursor)
+func (s *drawService) GetCyclesByCircle(ctx context.Context, circleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.CycleDB, error) {
+	return s.repo.GetCyclesByCircle(ctx, circleID, limit, cursorTime, cursorID)
 }
 func (s *drawService) GetCycle(ctx context.Context, cycleID string) (*repository.CycleDB, error) {
 	return s.repo.GetCycle(ctx, cycleID)

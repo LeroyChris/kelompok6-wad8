@@ -20,6 +20,8 @@ export const circleService = {
   getPaymentMatrix: async (circleId: string) => {
     return await apiClient.get(`/circles/${circleId}/payment-matrix`);
   },
+  getPaymentProofs: (circleId: string) => apiClient.get(`/circles/${circleId}/payment-proofs`, { params: { status: 'PENDING' } }),
+  reviewPaymentProof: (proofId: string, reviewStatus: 'APPROVED' | 'REJECTED') => apiClient.post(`/payment-proofs/${proofId}/review`, { review_status: reviewStatus }),
 
   // Buat circle baru (Ketua Circle)
   createCircle: async (data: {
@@ -35,6 +37,9 @@ export const circleService = {
   joinCircle: async (inviteCode: string) => {
     return await apiClient.post('/circles/join', { invite_code: inviteCode });
   },
+
+  lockCircle: (circleId: string) => apiClient.post(`/circles/${circleId}/lock`),
+  createCycle: (circleId: string, cycleNumber: number, dueAt: string) => apiClient.post(`/circles/${circleId}/cycles`, { cycle_number: cycleNumber, due_at: dueAt }),
 
   // Keluar dari Circle (Fitur Baru)
   leaveCircle: async (circleId: string) => {

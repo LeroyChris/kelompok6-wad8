@@ -219,14 +219,23 @@ func (h *WalletHandler) TopUpWallet(c *gin.Context) {
 		DO UPDATE SET balance = user_wallets.balance + EXCLUDED.balance, updated_at = CURRENT_TIMESTAMP
 		RETURNING wallet_id::text, balance::float8;
 	`
-	err := h.DB.QueryRow(ctx, upsertQuery, userID, req.Amount).Scan(&walletID, &newBalance)
+	tx, err := h.DB.Begin(ctx)
 	if err != nil {
-		// Fallback Sandbox Response agar tidak crash 500
-		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Top-up saldo sandbox berhasil (Sandbox Mode)", gin.H{
-			"wallet_id":    "wlt-sandbox-" + userID,
-			"topup_amount": req.Amount,
-			"new_balance":  req.Amount,
-		}))
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memulai top-up sandbox", nil))
+		return
+	}
+	defer tx.Rollback(ctx)
+	err = tx.QueryRow(ctx, upsertQuery, userID, req.Amount).Scan(&walletID, &newBalance)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memperbarui saldo wallet", nil))
+		return
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO wallet_transactions (wallet_id, amount, tx_type, description) VALUES ($1, $2, 'TOPUP', 'Top-up sandbox')`, walletID, req.Amount); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mencatat top-up wallet", nil))
+		return
+	}
+	if err = tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menyimpan top-up wallet", nil))
 		return
 	}
 

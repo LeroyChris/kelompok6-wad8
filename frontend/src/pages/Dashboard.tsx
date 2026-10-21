@@ -1,183 +1,69 @@
-import { useState, useEffect } from 'react';
-import { userWalletService } from '../services/userWalletService';
+import { useCallback, useEffect, useState } from 'react';
+import { Disc, Gavel, LockKeyhole, Play, Wallet } from 'lucide-react';
 import { circleService } from '../services/circleService';
-import { Gavel, Disc, Copy, Check, Users, KeyRound } from 'lucide-react';
+import { cycleService } from '../services/cycleService';
+import { userWalletService } from '../services/userWalletService';
+import type { Cycle, Obligation } from '../services/types';
+import PaymentModal from '../components/PaymentModal';
 
-export default function Dashboard({ 
-  circleId, 
-  onNavigate 
-}: { 
-  circleId: string; 
-  onNavigate?: (screen: string) => void;
-}) {
-  const [members, setMembers] = useState<any[]>([]);
-  const [circleDetail, setCircleDetail] = useState<any>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(0);
-  const [reputationScore, setReputationScore] = useState<number>(100);
-  const [profileName, setProfileName] = useState<string>('Pengguna');
-  const [apiLoading, setApiLoading] = useState<boolean>(true);
-  const [copied, setCopied] = useState<boolean>(false);
-
-  const fetchBackendData = async () => {
-    if (!circleId) return;
+type PaymentProof = { payment_proof_id: string; full_name: string; amount: number; proof_url: string };
+type CircleDetail = { circle_name: string; track_type: 'SPSB' | 'RANDOM_DRAW'; invite_code?: string; active_member_count: number; circle_status: string };
+export default function Dashboard({ circleId, role, onNavigate }: { circleId: string; role: string; onNavigate: (screen: string) => void }) {
+  const [detail, setDetail] = useState<CircleDetail | null>(null);
+  const [balance, setBalance] = useState(0);
+  const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [obligations, setObligations] = useState<Obligation[]>([]);
+  const [selected, setSelected] = useState<Obligation | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [proofs, setProofs] = useState<PaymentProof[]>([]);
+  const cycle = cycles.find((item) => !['COMPLETED', 'CANCELLED'].includes(item.cycle_status)) ?? cycles[0] ?? null;
+	const noActiveCycle = !cycles.some((item) => !['COMPLETED', 'CANCELLED'].includes(item.cycle_status));
+  const load = useCallback(async () => {
     try {
-      setApiLoading(true);
-      const [resWallet, resProfile, resRep, resMembers, resDetail] = await Promise.allSettled([
-        userWalletService.getWalletBalance(),
-        userWalletService.getProfile(),
-        userWalletService.getReputation(),
-        circleService.getCircleMembers(circleId),
-        circleService.getCircleDetail(circleId),
-      ]);
-
-      if (resWallet.status === 'fulfilled' && resWallet.value.data?.data) {
-        setWalletBalance(resWallet.value.data.data.balance || 0);
-      }
-      if (resProfile.status === 'fulfilled' && resProfile.value.data?.data) {
-        setProfileName(resProfile.value.data.data.full_name || 'Pengguna');
-      }
-      if (resRep.status === 'fulfilled' && resRep.value.data?.data) {
-        setReputationScore(resRep.value.data.data.reputation_score || 100);
-      }
-      if (resDetail.status === 'fulfilled' && resDetail.value.data?.data) {
-        setCircleDetail(resDetail.value.data.data);
-      }
-
-      if (resMembers.status === 'fulfilled') {
-        const rawRes = resMembers.value.data;
-        const memberList = Array.isArray(rawRes?.data?.items)
-          ? rawRes.data.items
-          : Array.isArray(rawRes?.data)
-          ? rawRes.data
-          : Array.isArray(rawRes)
-          ? rawRes
-          : [];
-
-        setMembers(
-          memberList.map((m: any, idx: number) => ({
-            id: m.user_id || m.circle_membership_id || idx,
-            fullName: m.full_name || m.name || 'Member',
-            role: m.membership_role || 'MEMBER',
-            status: (m.membership_status || 'active').toLowerCase(),
-            email: m.email || '',
-          }))
-        );
-      }
-    } catch (err) {
-      console.warn('Gagal memuat data dashboard:', err);
-    } finally {
-      setApiLoading(false);
-    }
+      setError('');
+      const [detailResponse, walletResponse, cyclesResponse] = await Promise.all([circleService.getCircleDetail(circleId), userWalletService.getWalletBalance(), cycleService.getCycles(circleId)]);
+      setDetail(detailResponse.data?.data ?? null);
+      setBalance(walletResponse.data?.data?.balance ?? 0);
+      const listed = (cyclesResponse.data?.data?.items ?? []) as Cycle[];
+      setCycles(listed);
+      const active = listed.find((item) => !['COMPLETED', 'CANCELLED'].includes(item.cycle_status)) ?? listed[0] ?? null;
+      if (role === 'OWNER' || role === 'ADMIN') {
+        const proofResponse = await circleService.getPaymentProofs(circleId);
+        setProofs(proofResponse.data?.data?.items ?? []);
+      } else setProofs([]);
+      if (active) {
+        const obligationsResponse = await cycleService.getObligations(active.cycle_id);
+        setObligations(obligationsResponse.data?.data?.items ?? []);
+      } else setObligations([]);
+    } catch { setError('Dashboard tidak dapat dimuat dari server.'); }
+  }, [circleId, role]);
+  useEffect(() => { void load(); }, [load]);
+  const ownerAction = async (action: 'lock' | 'cycle') => {
+    setBusy(true); setError('');
+    try {
+      if (action === 'lock') await circleService.lockCircle(circleId);
+      else await circleService.createCycle(circleId, Math.max(0, ...cycles.map((item) => item.cycle_number)) + 1, new Date(Date.now() + 30 * 86400000).toISOString());
+      await load();
+    } catch { setError(action === 'lock' ? 'Circle belum penuh atau tidak dapat dikunci.' : 'Cycle tidak dapat dibuat. Pastikan circle sudah LOCKED.'); }
+    finally { setBusy(false); }
   };
-
-  useEffect(() => {
-    fetchBackendData();
-  }, [circleId]);
-
-  const copyInviteCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const reviewProof = async (proofId: string, status: 'APPROVED' | 'REJECTED') => {
+    setBusy(true);
+    try { await circleService.reviewPaymentProof(proofId, status); await load(); }
+    catch { setError('Bukti pembayaran tidak dapat ditinjau.'); }
+    finally { setBusy(false); }
   };
-
-  const isSPSB = circleDetail?.track_type === 'SPSB';
-  const inviteCode = circleDetail?.invite_code || 'ARK-8891X';
-
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <header className="shrink-0 bg-white border-b px-6 py-3.5 flex items-center justify-between">
-        <div>
-          <h1 className="text-sm font-black text-[#0A2578]">Halo, {profileName}!</h1>
-          <p className="text-[11px] text-slate-400 font-semibold">
-            Active Circle: <span className="text-[#0A2578] font-bold">{circleDetail?.circle_name || 'Arisan'}</span>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* TAMPILAN KODE UNDANGAN */}
-          <button
-            onClick={() => copyInviteCode(inviteCode)}
-            className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded-xl transition-all"
-            title="Klik untuk salin Kode Undangan"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-[#0A2578]" />
-            <span className="text-xs font-mono font-bold text-[#0A2578]">{inviteCode}</span>
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-          </button>
-
-          {isSPSB ? (
-            <button
-              onClick={() => onNavigate?.('spsb_auction')}
-              className="text-xs bg-[#F84A4D] hover:bg-[#e03a3d] text-white px-3.5 py-2 font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm"
-            >
-              <Gavel className="w-3.5 h-3.5" /> Room Lelang SPSB
-            </button>
-          ) : (
-            <button
-              onClick={() => onNavigate?.('spin_wheel')}
-              className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm"
-            >
-              <Disc className="w-3.5 h-3.5" /> Roda Pengocokan
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div className="bg-[#0A2578] text-white rounded-2xl p-5 shadow-sm">
-            <p className="text-[10px] text-white/60 font-bold uppercase">Saldo Dompet Real-Time</p>
-            <p className="text-2xl font-bold font-mono mt-2">
-              {apiLoading ? 'Loading...' : `Rp ${walletBalance.toLocaleString('id-ID')}`}
-            </p>
-          </div>
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Skor Reputasi Saya</p>
-            <p className="text-2xl font-bold text-[#0A2578] mt-2 font-mono">{reputationScore}/100</p>
-          </div>
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-            <p className="text-[10px] text-slate-400 font-bold uppercase">Anggota Circle Aktif</p>
-            <p className="text-2xl font-bold text-[#0A2578] mt-2 font-mono">{members.length} Orang</p>
-          </div>
-        </div>
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-          <h3 className="font-bold text-[#0A2578] text-sm mb-4">Daftar Anggota Circle Real-Time</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead>
-                <tr className="bg-slate-50 border-b font-bold text-slate-400">
-                  <th className="p-3">Nama Lengkap</th>
-                  <th className="p-3">Email</th>
-                  <th className="p-3">Role</th>
-                  <th className="p-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {members.map((m) => (
-                  <tr key={m.id}>
-                    <td className="p-3 font-bold text-slate-800">{m.fullName}</td>
-                    <td className="p-3 text-slate-500 font-mono">{m.email || '—'}</td>
-                    <td className="p-3 font-semibold text-[#0A2578]">{m.role}</td>
-                    <td className="p-3">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                        AKTIF
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {members.length === 0 && !apiLoading && (
-                  <tr>
-                    <td colSpan={4} className="p-6 text-center text-slate-400">
-                      Belum ada anggota terdaftar di Circle ini.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </main>
-    </div>
-  );
+  const unpaid = obligations.find((item) => item.status !== 'PAID');
+  const owner = role === 'OWNER';
+  return <section className="p-4 sm:p-6">
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-slate-500">Circle</p><h1 className="text-2xl font-black text-slate-800">{detail?.circle_name ?? 'Memuat…'}</h1></div>{detail?.invite_code && <code className="rounded-lg bg-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Invite: {detail.invite_code}</code>}</div>
+    {error && <p className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-[#991B1B]">{error}</p>}
+    <div className="grid gap-4 sm:grid-cols-3"><div className="rounded-2xl bg-[#065F46] p-5 text-white"><Wallet className="mb-3"/><p className="text-xs font-bold uppercase text-white/70">Saldo wallet</p><p className="mt-1 text-xl font-black">Rp {balance.toLocaleString('id-ID')}</p></div><div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><p className="text-xs font-bold uppercase text-slate-500">Cycle aktif</p><p className="mt-2 text-xl font-black text-slate-800">{cycle ? `#${cycle.cycle_number}` : 'Belum ada'}</p><p className="text-xs text-slate-500">{cycle?.cycle_status ?? 'Belum dimulai'}</p></div><div className="rounded-2xl bg-white p-5 ring-1 ring-slate-200"><p className="text-xs font-bold uppercase text-slate-500">Status circle</p><p className="mt-2 text-xl font-black text-slate-800">{detail?.circle_status ?? '—'}</p><p className="text-xs text-slate-500">{detail?.active_member_count ?? 0} anggota aktif</p></div></div>
+    {owner && detail?.circle_status === 'RECRUITING' && <button disabled={busy} onClick={() => void ownerAction('lock')} className="mt-5 rounded-xl bg-[#991B1B] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><LockKeyhole className="mr-1 inline w-4"/>Kunci circle saat penuh</button>}
+    {owner && noActiveCycle && (detail?.circle_status === 'LOCKED' || detail?.circle_status === 'RUNNING') && <button disabled={busy} onClick={() => void ownerAction('cycle')} className="mt-5 rounded-xl bg-[#991B1B] px-4 py-3 text-sm font-bold text-white disabled:opacity-50"><Play className="mr-1 inline w-4"/>{cycles.length === 0 ? 'Mulai cycle pertama' : 'Mulai cycle berikutnya'}</button>}
+    <div className="mt-5 rounded-2xl bg-white p-5 ring-1 ring-slate-200"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="font-black text-slate-800">Iuran saya</h2><p className="text-xs text-slate-500">Cycle saat ini</p></div>{cycle && detail?.track_type === 'SPSB' && <button onClick={() => onNavigate('auction')} className="rounded-xl bg-[#991B1B] px-4 py-2 text-sm font-bold text-white"><Gavel className="mr-1 inline w-4"/>Ajukan lelang</button>}{cycle && detail?.track_type === 'RANDOM_DRAW' && <button onClick={() => onNavigate('draw')} className="rounded-xl bg-[#991B1B] px-4 py-2 text-sm font-bold text-white"><Disc className="mr-1 inline w-4"/>Random draw</button>}</div>{unpaid ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4"><span className="text-sm font-bold text-slate-700">Rp {unpaid.amount_due.toLocaleString('id-ID')} · {unpaid.status}</span><button onClick={() => setSelected(unpaid)} className="rounded-lg bg-[#991B1B] px-3 py-2 text-sm font-bold text-white">Bayar sekarang</button></div> : <p className="mt-4 text-sm text-[#065F46]">Tidak ada iuran Anda yang belum dibayar pada cycle ini.</p>}</div>
+    {(role === 'OWNER' || role === 'ADMIN') && proofs.length > 0 && <div className="mt-5 rounded-2xl bg-white p-5 ring-1 ring-slate-200"><h2 className="font-black text-slate-800">Bukti transfer menunggu review</h2><div className="mt-3 grid gap-3">{proofs.map((proof) => <div key={proof.payment_proof_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-3 text-sm"><div><p className="font-bold">{proof.full_name} · Rp {proof.amount.toLocaleString('id-ID')}</p><a href={proof.proof_url} target="_blank" rel="noreferrer" className="text-xs text-[#991B1B] underline">Lihat bukti</a></div><div className="flex gap-2"><button disabled={busy} onClick={() => void reviewProof(proof.payment_proof_id, 'REJECTED')} className="rounded-lg border border-[#991B1B] px-3 py-2 text-xs font-bold text-[#991B1B]">Tolak</button><button disabled={busy} onClick={() => void reviewProof(proof.payment_proof_id, 'APPROVED')} className="rounded-lg bg-[#065F46] px-3 py-2 text-xs font-bold text-white">Setujui</button></div></div>)}</div></div>}
+    {selected && <PaymentModal obligationId={selected.obligation_id} amount={selected.amount_due} onClose={() => setSelected(null)} onSuccess={() => { setSelected(null); void load(); }} />}
+  </section>;
 }

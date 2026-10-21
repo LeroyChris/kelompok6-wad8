@@ -40,15 +40,13 @@ VALUES
 
 -- Trigger otomatis membuatkan user_wallets berisi Rp 5.000.000 untuk tiap user di atas.
 
--- Login Identities (Phone OTP & Google)
+-- Login identities (email sandbox OTP)
 INSERT INTO user_auth_identities (user_id, provider, provider_subject)
 VALUES
-    ('11111111-1111-1111-1111-111111111111', 'PHONE_OTP', '081234567890'),
-    ('11111111-1111-1111-1111-111111111111', 'GOOGLE', 'tiara@arisankita.id'),
-    ('22222222-2222-2222-2222-222222222222', 'PHONE_OTP', '081298765432'),
-    ('22222222-2222-2222-2222-222222222222', 'GOOGLE', 'abda@arisankita.id'),
-    ('33333333-3333-3333-3333-333333333333', 'PHONE_OTP', '081311223344'),
-    ('44444444-4444-4444-4444-444444444444', 'PHONE_OTP', '081599887766');
+    ('11111111-1111-1111-1111-111111111111', 'EMAIL_OTP', 'tiara@arisankita.id'),
+    ('22222222-2222-2222-2222-222222222222', 'EMAIL_OTP', 'abda@arisankita.id'),
+    ('33333333-3333-3333-333333333333', 'EMAIL_OTP', 'leroy@arisankita.id'),
+    ('44444444-4444-4444-4444-444444444444', 'EMAIL_OTP', 'nadia@arisankita.id');
 
 -- Rekening Bank User
 INSERT INTO user_bank_accounts (
@@ -170,14 +168,12 @@ WHERE user_id IN (
 INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description)
 SELECT uw.wallet_id, 500000.00, 'DUES_PAYMENT', po.payment_order_id, 'Pembayaran iuran Arisan Keluarga RT 05 Putaran 1'
 FROM user_wallets uw
-JOIN user_auth_identities uai
-    ON uai.user_id = uw.user_id
-   AND uai.provider = 'PHONE_OTP'
-JOIN payment_orders po ON po.idempotency_key = CASE uai.provider_subject
-    WHEN '081234567890' THEN 'seed-cycle-1-tiara'
-    WHEN '081298765432' THEN 'seed-cycle-1-abda'
-    WHEN '081311223344' THEN 'seed-cycle-1-leroy'
-    WHEN '081599887766' THEN 'seed-cycle-1-nadia'
+JOIN users u ON u.user_id = uw.user_id
+JOIN payment_orders po ON po.idempotency_key = CASE u.email
+    WHEN 'tiara@arisankita.id' THEN 'seed-cycle-1-tiara'
+    WHEN 'abda@arisankita.id' THEN 'seed-cycle-1-abda'
+    WHEN 'leroy@arisankita.id' THEN 'seed-cycle-1-leroy'
+    WHEN 'nadia@arisankita.id' THEN 'seed-cycle-1-nadia'
 END
 WHERE uw.user_id IN (
     '11111111-1111-1111-1111-111111111111',
@@ -343,13 +339,11 @@ WHERE user_id IN (
 INSERT INTO wallet_transactions (wallet_id, amount, tx_type, reference_id, description)
 SELECT uw.wallet_id, 1000000.00, 'DUES_PAYMENT', po.payment_order_id, 'Pembayaran iuran Arisan Fintech Squad Putaran 1'
 FROM user_wallets uw
-JOIN user_auth_identities uai
-    ON uai.user_id = uw.user_id
-   AND uai.provider = 'PHONE_OTP'
-JOIN payment_orders po ON po.idempotency_key = CASE uai.provider_subject
-    WHEN '081298765432' THEN 'seed-spsb-abda'
-    WHEN '081234567890' THEN 'seed-spsb-tiara'
-    WHEN '081311223344' THEN 'seed-spsb-leroy'
+JOIN users u ON u.user_id = uw.user_id
+JOIN payment_orders po ON po.idempotency_key = CASE u.email
+    WHEN 'abda@arisankita.id' THEN 'seed-spsb-abda'
+    WHEN 'tiara@arisankita.id' THEN 'seed-spsb-tiara'
+    WHEN 'leroy@arisankita.id' THEN 'seed-spsb-leroy'
 END
 WHERE uw.user_id IN (
     '11111111-1111-1111-1111-111111111111',

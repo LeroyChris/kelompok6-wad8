@@ -28,6 +28,9 @@ type drawRepoStub struct {
 func (s *drawRepoStub) GetCycleParticipantsPaginated(context.Context, string, int, int) ([]repository.ParticipantDB, int64, error) {
 	return nil, 0, nil
 }
+func (s *drawRepoStub) GetCycleParticipantsCursor(context.Context, string, int, *time.Time, string) ([]repository.ParticipantDB, error) {
+	return nil, nil
+}
 func (s *drawRepoStub) GetEligibleParticipants(context.Context, string) ([]repository.ParticipantDB, error) {
 	return s.candidates, nil
 }
@@ -44,11 +47,11 @@ func (s *drawRepoStub) SaveBid(context.Context, string, string, float64) error {
 	s.saved = true
 	return nil
 }
-func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _ string, winner repository.BidEntry, winningRate, payableRate, grossAmount, netAmount float64, _ string) (string, error) {
+func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _, _ string, winner repository.BidEntry, winningRate, payableRate, grossAmount, netAmount float64, _ string) (string, error) {
 	s.executed, s.winner, s.winningRate, s.payableRate, s.grossAmount, s.netAmount = true, winner, winningRate, payableRate, grossAmount, netAmount
 	return "award", nil
 }
-func (s *drawRepoStub) ExecuteRandomDrawTransaction(_ context.Context, _ string, winner repository.ParticipantDB, gross float64, _ string, _ string, _ string, _ string, _ int) (string, error) {
+func (s *drawRepoStub) ExecuteRandomDrawTransaction(_ context.Context, _, _ string, winner repository.ParticipantDB, gross float64, _ string, _ string, _ string, _ string, _ int) (string, error) {
 	s.randomExecuted, s.randomWinner, s.randomGross = true, winner, gross
 	return "award", nil
 }
@@ -63,7 +66,7 @@ func (s *drawRepoStub) OpenCycleWithParticipantsAndObligations(context.Context, 
 }
 func (s *drawRepoStub) GetPaidPot(context.Context, string) (float64, error) { return s.paidPot, nil }
 func (s *drawRepoStub) CloseBidding(context.Context, string) error          { return nil }
-func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, int) ([]repository.CycleDB, error) {
+func (s *drawRepoStub) GetCyclesByCircle(context.Context, string, int, *time.Time, string) ([]repository.CycleDB, error) {
 	return nil, nil
 }
 
@@ -77,7 +80,7 @@ func TestExecuteSPSBUsesSecondPriceAndPaidPot(t *testing.T) {
 			{ParticipantID: "faza", UserID: "user-b", FullName: "Leroy", BidRatePercent: 5.0},
 		},
 	}
-	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle", "actor")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +107,7 @@ func TestExecuteRandomDrawUsesEligibleCandidatesAndPaidPot(t *testing.T) {
 			{ParticipantID: "leroy", UserID: "user-b", Name: "Leroy"},
 		},
 	}
-	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle", "actor")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +146,10 @@ func TestSubmitBidRules(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.info.CycleStatus == "BIDDING_OPEN" && test.info.TrackType == "SPSB" {
+				opened, closes := time.Now().Add(-time.Minute), time.Now().Add(time.Minute)
+				test.info.BiddingOpenAt, test.info.BiddingCloseAt = &opened, &closes
+			}
 			repo := &drawRepoStub{info: &test.info}
 			err := NewDrawService(repo).SubmitBid(context.Background(), "cycle", "user", test.bid)
 			if (err != nil) != test.wantError {

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, KeyRound, RefreshCw, Users } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { X, KeyRound, RefreshCw } from 'lucide-react';
 import { circleService } from '../services/circleService';
 
 export default function JoinCircleModal({
@@ -17,7 +17,7 @@ export default function JoinCircleModal({
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!inviteCode.trim()) return;
 
@@ -28,8 +28,8 @@ export default function JoinCircleModal({
       await circleService.joinCircle(inviteCode.trim().toUpperCase());
       onSuccess();
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || 'Kode undangan tidak valid atau sudah kedaluwarsa.');
+    } catch {
+      setErrorMsg('Kode undangan tidak valid atau sudah kedaluwarsa.');
     } finally {
       setLoading(false);
     }

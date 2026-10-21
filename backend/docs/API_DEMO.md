@@ -1,101 +1,70 @@
 # API Demo Guide
 
-Base URL lokal: `http://localhost:8080/api/v1`
+Base URL lokal: `http://localhost:8080/api/v1`. Jalankan migration berurutan
+`001_schema_v2.sql` → `002_core_hardening.sql` → `005_email_otp_identity.sql`
+→ `003_seed_demo_data.sql` → `004_audit_events.sql` → `006_audit_actor_context.sql`
+→ `007_migrate_legacy_identities_to_email_otp.sql`.
 
-Seluruh user demo sudah tersedia di database seed. OTP sandbox adalah nilai `SANDBOX_OTP_CODE` (default `123456`).
+## Authentication: email sandbox OTP
 
-| User | Phone | Circle |
-|---|---|---|
-| Tiara Maharani | `081234567890` | Owner RT 05, member Fintech Squad |
-| Abda Pratama | `081298765432` | Owner Fintech Squad, pemenang RT 05 cycle 1 |
-| Leroy Wijaya | `081311223344` | Member kedua circle |
-| Nadia Putri | `081599887766` | Member RT 05 |
-
-## 1. Login dan token
+Auth resmi hanya memakai email. Meminta OTP untuk email baru akan membuat record
+`users` dan `user_auth_identities` (`EMAIL_OTP`); trigger database otomatis
+membuat wallet. Kode sandbox adalah `SANDBOX_OTP_CODE` (default `123456`).
 
 ```bash
 export API_URL=http://localhost:8080/api/v1
-export PHONE=081234567890
+export EMAIL=tiara@arisankita.id
 
 curl -sS -X POST "$API_URL/auth/otp/request" \
   -H 'Content-Type: application/json' \
-  -d "{\"phone_number\":\"$PHONE\"}"
+  -d "{\"email\":\"$EMAIL\"}"
 
 export TOKEN=$(curl -sS -X POST "$API_URL/auth/otp/verify" \
   -H 'Content-Type: application/json' \
-  -d "{\"phone_number\":\"$PHONE\",\"otp_code\":\"123456\"}" \
+  -d "{\"email\":\"$EMAIL\",\"otp_code\":\"123456\"}" \
   | jq -r '.data.token')
-```
-
-All protected requests use:
-
-```bash
 export AUTH="Authorization: Bearer $TOKEN"
 ```
 
-## 2. User dan wallet
+Seed users: `tiara@arisankita.id`, `abda@arisankita.id`,
+`leroy@arisankita.id`, dan `nadia@arisankita.id`.
+
+## Core endpoints
 
 ```bash
 curl -sS "$API_URL/users/me" -H "$AUTH"
-curl -sS "$API_URL/users/me/win-history" -H "$AUTH"
-curl -sS "$API_URL/users/me/reputation" -H "$AUTH"
 curl -sS "$API_URL/wallet" -H "$AUTH"
-curl -sS "$API_URL/wallet/transactions?limit=20" -H "$AUTH"
-```
-
-Sandbox top-up hanya boleh digunakan di environment non-production:
-
-```bash
-curl -sS -X POST "$API_URL/wallet/topups" \
-  -H "$AUTH" -H 'Content-Type: application/json' \
-  -d '{"amount":100000}'
-```
-
-## 3. Circle dan invitation
-
-```bash
 curl -sS "$API_URL/circles?limit=20" -H "$AUTH"
-
-curl -sS -X POST "$API_URL/circles" \
-  -H "$AUTH" -H 'Content-Type: application/json' \
-  -d '{
-    "circle_name":"Arisan Demo Baru",
-    "track_type":"RANDOM_DRAW",
-    "contribution_amount":500000,
-    "member_limit":4,
-    "period_type":"MONTHLY"
-  }'
 ```
 
-Untuk SPSB, payload wajib memuat `bid_floor_percent` dan `bid_ceiling_percent`:
-
-```json
-{
-  "track_type": "SPSB",
-  "bid_floor_percent": 1,
-  "bid_ceiling_percent": 20
-}
-```
-
-## 4. Siklus, pembayaran, dan award
-
-Owner membuat cycle, kemudian setiap member membayar obligation miliknya. Setelah semua obligation `PAID`, backend mengubah status cycle otomatis menjadi `READY_FOR_DISBURSEMENT` (Random Draw) atau `BIDDING_OPEN` (SPSB).
+Create circle, join via invitation, lock saat penuh, lalu owner membuat cycle:
 
 ```bash
-# Random Draw: owner/admin resolve setelah READY_FOR_DISBURSEMENT
-curl -sS -X POST "$API_URL/cycles/<cycle_id>/draw" -H "$AUTH"
+curl -sS -X POST "$API_URL/circles" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"circle_name":"Arisan Demo Baru","track_type":"RANDOM_DRAW","contribution_amount":500000,"member_limit":4,"period_type":"MONTHLY"}'
 
-# SPSB: member submit bid, owner/admin tutup bidding, lalu resolve.
-curl -sS -X POST "$API_URL/cycles/<cycle_id>/bids" \
-  -H "$AUTH" -H 'Content-Type: application/json' \
-  -d '{"bid_rate_percent":7.5}'
-
-curl -sS -X POST "$API_URL/cycles/<cycle_id>/bidding/close" -H "$AUTH"
-curl -sS -X POST "$API_URL/cycles/<cycle_id>/draw" -H "$AUTH"
+curl -sS -X POST "$API_URL/circles/<circle_id>/lock" -H "$AUTH"
+curl -sS -X POST "$API_URL/circles/<circle_id>/cycles" -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"cycle_number":1,"due_at":"2026-12-01T00:00:00Z"}'
 ```
 
-## Authorization summary
+Pay an owned obligation with an idempotency key, or create a manual order and
+upload its proof:
 
-- Member aktif: profile sendiri, wallet sendiri, circle/cycle sendiri, bid sendiri, obligation sendiri.
-- Owner/admin: invitation, review proof, close bidding, resolve award.
-- Owner: lock circle, create cycle, update member role/status.
+```bash
+curl -sS -X POST "$API_URL/obligations/<obligation_id>/payments/wallet" \
+  -H "$AUTH" -H 'Idempotency-Key: demo-payment-001'
+
+curl -sS -X POST "$API_URL/obligations/<obligation_id>/payments/manual" -H "$AUTH"
+curl -sS -X POST "$API_URL/payments/<payment_order_id>/proof" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"proof_url":"https://example.test/proof.png"}'
+```
+
+Resolve a ready cycle. SPSB members submit bids first, and owner/admin closes
+bidding before award resolution.
+
+```bash
+curl -sS -X POST "$API_URL/cycles/<cycle_id>/award/resolve" -H "$AUTH"
+curl -sS "$API_URL/cycles/<cycle_id>/award" -H "$AUTH"
+curl -sS "$API_URL/cycles/<cycle_id>/draw-proof" -H "$AUTH"
+```

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Mail, KeyRound, Shield, ArrowLeft, RefreshCw } from 'lucide-react';
 import apiClient from '../services/api';
 
@@ -17,7 +17,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
 
   if (!isOpen) return null;
 
-  const handleRequestOTP = async (e: React.FormEvent) => {
+  const handleRequestOTP = async (e: FormEvent) => {
     e.preventDefault();
     if (!email || !email.includes('@')) {
       setErrorMsg('Masukkan alamat email yang valid.');
@@ -27,20 +27,20 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
     try {
       setLoading(true);
       setErrorMsg('');
-      const res = await apiClient.post('/auth/email/request-otp', { email });
+      const res = await apiClient.post('/auth/otp/request', { email });
       if (res.data?.status === 'success') {
         setStep('otp');
       } else {
         setErrorMsg(res.data?.message || 'Gagal mengirim kode OTP.');
       }
-    } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || 'Gagal terhubung ke server.');
+    } catch {
+      setErrorMsg('Gagal terhubung ke server.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleVerifyOTP = async (e: React.FormEvent) => {
+  const handleVerifyOTP = async (e: FormEvent) => {
     e.preventDefault();
     if (!otpCode || otpCode.length < 6) {
       setErrorMsg('Masukkan 6 digit kode OTP.');
@@ -50,7 +50,7 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
     try {
       setLoading(true);
       setErrorMsg('');
-      const res = await apiClient.post('/auth/email/verify-otp', { email, otp_code: otpCode });
+      const res = await apiClient.post('/auth/otp/verify', { email, otp_code: otpCode });
       
       const token = res.data?.data?.token || res.data?.token;
       if (token) {
@@ -59,8 +59,8 @@ export default function LoginModal({ isOpen, onClose, onSuccess }: LoginModalPro
       } else {
         setErrorMsg('Token tidak ditemukan dari respon server.');
       }
-    } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || 'Kode OTP tidak valid.');
+    } catch {
+      setErrorMsg('Kode OTP tidak valid.');
     } finally {
       setLoading(false);
     }
