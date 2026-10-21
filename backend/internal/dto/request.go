@@ -7,8 +7,7 @@ type RequestEmailOTPRequest struct {
 
 // DTO untuk Verifikasi OTP via Email
 type VerifyEmailOTPRequest struct {
-	Email string `json:"email" binding:"required,email"`
-	OTP   string `json:"otp" binding:"required,len=6"`
+	Email string `json:"email" binding:"required,len=6"`
 }
 
 // DTO untuk Register User
@@ -19,7 +18,7 @@ type RegisterRequest struct {
 	Password    string `json:"password" binding:"required,min=6"`
 }
 
-// DTO untuk Login User (Legacy/Password)
+// DTO untuk Login User
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
@@ -28,14 +27,14 @@ type LoginRequest struct {
 // DTO untuk Pembuatan Circle Baru
 type CreateCircleRequest struct {
 	CircleName  string  `json:"circle_name" binding:"required"`
-	TrackType   string  `json:"track_type" binding:"required"` // 'TRACK_A_COMMERCIAL' / 'TRACK_B_SOCIAL'
+	TrackType   string  `json:"track_type" binding:"required"` // 'SPSB' / 'RANDOM_DRAW'
 	MonthlyDues float64 `json:"monthly_dues" binding:"required,gt=0"`
 	MaxMembers  int     `json:"max_members" binding:"required,gt=1"`
 }
 
 // DTO untuk Penawaran Lelang SPSB (Track A)
 type SubmitBidRequest struct {
-	BidAmount float64 `json:"bid_amount" binding:"required,gt=0"`
+	BidRatePercent float64 `json:"bid_rate_percent" binding:"required,gte=0,lte=100"`
 }
 
 // DTO untuk Kampanye Patungan Internal

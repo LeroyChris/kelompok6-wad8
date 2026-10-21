@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Zap, Users, HandCoins, Building2 } from 'lucide-react';
+import { X, Users, Zap } from 'lucide-react';
 import { circleService } from '../services/circleService';
 
 export default function CreateCircleModal({
@@ -27,10 +27,10 @@ export default function CreateCircleModal({
 
     try {
       await circleService.createCircle({
-        circle_name: circleName,
+        circle_name: circleName.trim(),
         track_type: trackType,
-        contribution_amount: contributionAmount,
-        member_limit: memberLimit,
+        contribution_amount: Number(contributionAmount),
+        member_limit: Number(memberLimit),
       });
       onSuccess();
       onClose();
