@@ -12,6 +12,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/005_email_otp_iden
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_seed_demo_data.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/004_audit_events.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/006_audit_actor_context.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/007_migrate_legacy_identities_to_email_otp.sql
 ```
 
 If using the Supabase SQL Editor, paste and run the files in exactly the same order. Do not run the reset file on a database that contains data you need to retain.
