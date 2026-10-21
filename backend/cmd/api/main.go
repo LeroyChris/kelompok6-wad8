@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strings"
 
 	"backend-arisankita/internal/config"
 	"backend-arisankita/internal/handlers"
@@ -23,10 +24,11 @@ func main() {
 
 	r := gin.Default()
 
-	// CORS Setup untuk Frontend React Vite
+	// CORS is explicit to prevent arbitrary websites from using authenticated APIs.
 	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowOrigins = allowedCORSOrigins()
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"}
 	r.Use(cors.New(corsConfig))
 
 	// Inisialisasi Layer Repositories & Services
@@ -105,14 +107,16 @@ func main() {
 			circles.POST("/join", circleHandler.JoinCircle)
 			circles.GET("", circleHandler.GetCircles)
 			circles.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleDetail)
+			circles.PATCH("/:id", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateCircle)
 			circles.POST("/:id/lock", middleware.RequireCircleRole(db, "OWNER"), circleHandler.LockCircle)
 			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
+			circles.GET("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.GetInvitations)
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 			circles.GET("/:id/payment-matrix", paymentHandler.GetPaymentMatrix)
 			// Relasi Siklus
-			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
-			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)
+			circles.GET("/:id/cycles", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCircleCycles)
+			circles.POST("/:id/cycles", middleware.RequireCircleRole(db, "OWNER"), drawHandler.CreateCircleCycle)
 		}
 
 		invitations := v1.Group("/invitations")
@@ -121,30 +125,19 @@ func main() {
 			invitations.POST("/join", circleHandler.JoinCircle)
 		}
 
-		groups := v1.Group("/groups")
-		groups.Use(middleware.AuthMiddleware())
-		{
-			groups.POST("", circleHandler.CreateGroup)
-			groups.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetGroupDetail)
-			groups.POST("/:id/join", circleHandler.JoinGroup)
-		}
-
 		// Siklus & Mesin Lelang/Kocok
 		cycles := v1.Group("/cycles")
 		cycles.Use(middleware.AuthMiddleware())
 		{
-			cycles.GET("/:id", drawHandler.GetCycleDetail)
-			cycles.GET("/:id/participants", drawHandler.GetCycleParticipants)
-			cycles.GET("/:id/obligations", drawHandler.GetCycleObligations)
-			cycles.POST("/:id/bids", drawHandler.SubmitCycleBid)
-			cycles.POST("/:id/draw", drawHandler.ExecuteCycleDraw)
-			cycles.GET("/:id/award", drawHandler.GetCycleAward)
-		}
-
-		draws := v1.Group("/draws")
-		draws.Use(middleware.AuthMiddleware())
-		{
-			draws.GET("/group/:id", drawHandler.GetGroupDraws)
+			cycles.GET("/:id", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleDetail)
+			cycles.GET("/:id/participants", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleParticipants)
+			cycles.GET("/:id/obligations", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleObligations)
+			cycles.POST("/:id/bids", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
+			cycles.GET("/:id/bids/me", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetMyCycleBid)
+			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
+			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
+			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
+			cycles.GET("/:id/draw-proof", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetDrawProof)
 		}
 
 		// Pembayaran & Tagihan
@@ -152,6 +145,8 @@ func main() {
 		obligations.Use(middleware.AuthMiddleware())
 		{
 			obligations.POST("/:id/pay", paymentHandler.PayObligation)
+			obligations.POST("/:id/payments/wallet", paymentHandler.PayObligation)
+			obligations.POST("/:id/payments/manual", paymentHandler.PayObligation)
 		}
 
 		payments := v1.Group("/payments")
@@ -159,13 +154,9 @@ func main() {
 		{
 			payments.GET("/:id", paymentHandler.GetPaymentDetail)
 			payments.POST("/:id/proof", paymentHandler.UploadPaymentProof)
-			payments.POST("", paymentHandler.SubmitPayment)
-			payments.GET("/group/:id", paymentHandler.GetGroupPayments)
-			payments.PATCH("/:id/verify", paymentHandler.VerifyPayment)
 		}
 
 		v1.POST("/payment-proofs/:id/review", middleware.AuthMiddleware(), paymentHandler.ReviewPaymentProof)
-		v1.POST("/webhooks/payment-gateway", paymentHandler.HandlePaymentGatewayWebhook)
 	}
 
 	port := os.Getenv("PORT")
@@ -177,4 +168,19 @@ func main() {
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("[FATAL] Gagal menjalankan server: %v", err)
 	}
+}
+
+func allowedCORSOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if origin := strings.TrimSpace(part); origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
 }

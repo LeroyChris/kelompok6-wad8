@@ -81,6 +81,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/000_reset_public_s
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_schema_v2.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_core_hardening.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_seed_demo_data.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/004_audit_events.sql
 ```
 
 ### 3. Menjalankan Backend

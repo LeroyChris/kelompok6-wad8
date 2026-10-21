@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { userWalletService } from '../services/userWalletService';
+import { cycleService, type CycleItem, type ObligationItem } from '../services/cycleService';
 import {
   Copy,
   Check,
@@ -23,12 +24,10 @@ import {
 /* ─── Types ─── */
 type StatusKey = 'lunas' | 'pending' | 'overdue';
 type Filter = 'all' | 'lunas' | 'unpaid';
+type PaymentMember = { id: string | number; name: string; initials: string; status: StatusKey; date: string; method: string; color: string; };
 
 /* ─── Data Fallback ─── */
-const members: Array<{
-  id: number; name: string; initials: string; status: StatusKey;
-  date: string; method: string; color: string;
-}> = [
+const members: PaymentMember[] = [
   { id: 1, name: 'Ahmad Rizky',    initials: 'AR', status: 'lunas',   date: '12 Okt 2026', method: 'Virtual Account', color: 'from-[#5A83DB] to-[#0A2578]' },
   { id: 2, name: 'Farrel Abda',    initials: 'FA', status: 'lunas',   date: '14 Okt 2026', method: 'QRIS Midtrans',   color: 'from-emerald-500 to-emerald-700' },
   { id: 3, name: 'Santi Putri',    initials: 'SP', status: 'lunas',   date: '10 Okt 2026', method: 'Transfer Bank',   color: 'from-purple-500 to-purple-700' },
@@ -88,14 +87,18 @@ export interface DashboardProps {
   onNavigate?:    (screen: string) => void;
   embedded?:      boolean;
   onOpenPayment?: () => void;
+  circleId?: string;
+  circleName?: string;
 }
 
 /* ─── Main Component ─── */
 export default function Dashboard({
   onNavigate,
+  circleId,
+  circleName,
 }: DashboardProps) {
   const [copiedCode, setCopiedCode]   = useState(false);
-  const [reminded, setReminded]       = useState<Record<number, boolean>>({});
+  const [reminded, setReminded]       = useState<Record<string, boolean>>({});
   const [filter, setFilter]           = useState<Filter>('all');
   const [showPayModal, setPayModal]   = useState(false);
   const [searchQuery, setSearch]      = useState('');
@@ -108,9 +111,11 @@ export default function Dashboard({
   const [apiLoading, setApiLoading]           = useState<boolean>(true);
   const [topUpAmount, setTopUpAmount]         = useState<string>('100000');
   const [topUpLoading, setTopUpLoading]       = useState<boolean>(false);
+  const [activeCycle, setActiveCycle] = useState<CycleItem | null>(null);
+  const [paymentMembers, setPaymentMembers] = useState<PaymentMember[]>(members);
 
   // STATE REKENING BANK
-  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<Array<{ id: string; bank_name: string; account_number: string; account_holder: string }>>([]);
   const [showBankModal, setBankModal]   = useState<boolean>(false);
   const [newBankName, setNewBankName]   = useState<string>('BCA');
   const [newAccNo, setNewAccNo]         = useState<string>('');
@@ -129,8 +134,8 @@ export default function Dashboard({
       if (resWallet.data?.data) setWalletBalance(resWallet.data.data.balance);
       if (resProfile.data?.data) setProfileName(resProfile.data.data.full_name);
       if (resRep.data?.data) setReputationScore(resRep.data.data.reputation_score);
-    } catch (err) {
-      console.warn('Backend API menggunakan data fallback lokal:', err);
+    } catch {
+      console.warn('Backend API tidak dapat dihubungi.');
     } finally {
       setApiLoading(false);
     }
@@ -140,8 +145,8 @@ export default function Dashboard({
     try {
       const res = await userWalletService.getBankAccounts();
       if (res.data?.data) setBankAccounts(res.data.data);
-    } catch (err) {
-      console.warn('Gagal mengambil daftar rekening bank:', err);
+    } catch {
+      console.warn('Gagal mengambil daftar rekening bank.');
     }
   };
 
@@ -149,6 +154,31 @@ export default function Dashboard({
     fetchBackendData();
     fetchBankAccounts();
   }, []);
+
+  useEffect(() => {
+    if (!circleId) return;
+    const loadCycle = async () => {
+      try {
+        const cycleResponse = await cycleService.getCycles(circleId);
+        const cycles = cycleResponse.data?.data?.items as CycleItem[] | undefined;
+        const cycle = cycles?.find((item) => item.cycle_status === 'PAYMENT_COLLECTION') ?? cycles?.[0];
+        if (!cycle) { setActiveCycle(null); setPaymentMembers([]); return; }
+        setActiveCycle(cycle);
+        const obligationResponse = await cycleService.getObligations(cycle.cycle_id);
+        const obligations = obligationResponse.data?.data?.items as ObligationItem[] | undefined;
+        setPaymentMembers((obligations ?? []).map((item) => ({
+          id: item.obligation_id,
+          name: item.full_name,
+          initials: item.full_name.split(' ').map((part) => part[0]).join('').slice(0, 2),
+          status: item.status === 'PAID' ? 'lunas' : 'pending',
+          date: item.status === 'PAID' ? 'Lunas' : new Date(item.due_at).toLocaleDateString('id-ID'),
+          method: 'Wallet / Transfer',
+          color: 'from-[#5A83DB] to-[#0A2578]',
+        })));
+      } catch { setActiveCycle(null); }
+    };
+    loadCycle();
+  }, [circleId]);
 
   // Handlers
   const handleSandboxTopUp = async () => {
@@ -163,7 +193,7 @@ export default function Dashboard({
         setWalletBalance(res.data.data.new_balance);
         setPayModal(false);
       }
-    } catch (err) {
+    } catch {
       alert('Gagal melakukan Top-Up ke Backend Go. Pastikan Server Go aktif.');
     } finally {
       setTopUpLoading(false);
@@ -185,7 +215,7 @@ export default function Dashboard({
       setNewAccNo('');
       setNewAccHolder('');
       fetchBankAccounts();
-    } catch (err) {
+    } catch {
       alert('Gagal menambah rekening bank');
     }
   };
@@ -195,7 +225,7 @@ export default function Dashboard({
     try {
       await userWalletService.deleteBankAccount(id);
       fetchBankAccounts();
-    } catch (err) {
+    } catch {
       alert('Gagal menghapus rekening');
     }
   };
@@ -206,13 +236,13 @@ export default function Dashboard({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const lunasCount   = members.filter((m) => m.status === 'lunas').length;
-  const pendingCount = members.filter((m) => m.status === 'pending').length;
-  const overdueCount = members.filter((m) => m.status === 'overdue').length;
+  const lunasCount   = paymentMembers.filter((m) => m.status === 'lunas').length;
+  const pendingCount = paymentMembers.filter((m) => m.status === 'pending').length;
+  const overdueCount = paymentMembers.filter((m) => m.status === 'overdue').length;
 
   const statusOrder: Record<StatusKey, number> = { overdue: 0, pending: 1, lunas: 2 };
 
-  const filteredMembers = members
+  const filteredMembers = paymentMembers
     .filter((m) => {
       const matchSearch = searchQuery === '' || m.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchFilter =
@@ -305,7 +335,7 @@ export default function Dashboard({
           <div className="bg-white rounded-2xl p-5 flex flex-col gap-4 border border-slate-200/80 shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Target Iuran Siklus 4</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Target Iuran {activeCycle ? `Siklus ${activeCycle.cycle_number}` : 'Siklus'}</p>
                 <p className="text-xl font-extrabold text-[#0A2578] mt-1">Rp 1.000.000</p>
                 <p className="text-xs text-slate-400 font-medium">Per Anggota / Bulan</p>
               </div>
@@ -315,13 +345,13 @@ export default function Dashboard({
             </div>
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-500">{lunasCount} dari {members.length} Anggota Lunas</span>
-                <span className="text-[#0A2578]">{Math.round((lunasCount / members.length) * 100)}%</span>
+                <span className="text-slate-500">{lunasCount} dari {paymentMembers.length} Anggota Lunas</span>
+                <span className="text-[#0A2578]">{paymentMembers.length ? Math.round((lunasCount / paymentMembers.length) * 100) : 0}%</span>
               </div>
               <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-[#5A83DB] to-emerald-500 rounded-full transition-all duration-700"
-                  style={{ width: `${(lunasCount / members.length) * 100}%` }}
+                  style={{ width: `${paymentMembers.length ? (lunasCount / paymentMembers.length) * 100 : 0}%` }}
                 />
               </div>
             </div>
@@ -407,12 +437,12 @@ export default function Dashboard({
               <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <h3 className="font-extrabold text-[#0A2578] text-sm">Matriks Pembayaran Anggota</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Siklus 4 — Jatuh tempo 25 Okt 2026</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{circleName ?? 'Circle'} · {activeCycle ? `Siklus ${activeCycle.cycle_number}` : 'Belum ada siklus aktif'}</p>
                 </div>
                 <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
                   {(
                     [
-                      ['all', `Semua (${members.length})`],
+                      ['all', `Semua (${paymentMembers.length})`],
                       ['lunas', `Lunas (${lunasCount})`],
                       ['unpaid', `Belum Bayar (${pendingCount + overdueCount})`],
                     ] as [Filter, string][]

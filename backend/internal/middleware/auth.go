@@ -119,6 +119,35 @@ func RequireCircleRole(db *pgxpool.Pool, allowedRoles ...string) gin.HandlerFunc
 	}
 }
 
+// RequireCycleRole authorizes a user through the parent circle of :id cycle routes.
+func RequireCycleRole(db *pgxpool.Pool, allowedRoles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, cycleID := c.GetString("user_id"), c.Param("id")
+		if userID == "" || cycleID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Autentikasi atau siklus tidak valid"})
+			return
+		}
+		var role string
+		err := db.QueryRow(c.Request.Context(), `
+			SELECT cm.membership_role
+			FROM arisan_cycles ac
+			JOIN circle_memberships cm ON cm.circle_id = ac.circle_id
+			WHERE ac.cycle_id = $1 AND cm.user_id = $2 AND cm.membership_status = 'ACTIVE'`, cycleID, userID).Scan(&role)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": "error", "message": "Anda bukan anggota aktif cycle ini"})
+			return
+		}
+		for _, allowedRole := range allowedRoles {
+			if strings.EqualFold(role, allowedRole) {
+				c.Set("circle_role", role)
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": "error", "message": "Role circle tidak memiliki akses untuk aksi ini"})
+	}
+}
+
 func RequireRole(allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		val, exists := c.Get("role")

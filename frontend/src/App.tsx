@@ -49,6 +49,7 @@ type RoleType  = 'OWNER' | 'MEMBER';
 
 interface UserState   { isLoggedIn: boolean; role: RoleType; name: string; initials: string; reputation: number; }
 interface CircleState { id: string; name: string; trackType: TrackType; }
+interface CircleAPIItem { circle_id: string; circle_name: string; track_type: TrackType; }
 interface Toast       { id: string; message: string; type: 'success' | 'info' | 'warning' | 'error'; }
 interface PaymentCtx  { amount: number; purpose: string; }
 interface NavItem     { id: string; icon: React.ReactNode; label: string; targetScreen: Screen; activeOn: Screen[]; }
@@ -790,9 +791,9 @@ export default function App() {
     return {
       isLoggedIn: !!isValidToken,
       role: 'OWNER',
-      name: 'Farrel Abda',
-      initials: 'FA',
-      reputation: 98,
+      name: 'Pengguna',
+      initials: 'AK',
+      reputation: 100,
     };
   });
 
@@ -829,6 +830,42 @@ export default function App() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  const hydrateCircles = useCallback(async () => {
+    const response = await circleService.getCircles({ limit: 20 });
+    const items = response.data?.data?.items as CircleAPIItem[] | undefined;
+    if (!items?.length) {
+      setCircles([]);
+      return;
+    }
+    const loaded = items.map((item) => ({ id: item.circle_id, name: item.circle_name, trackType: item.track_type }));
+    setCircles(loaded);
+    setCircle((current) => loaded.find((item) => item.id === current.id) ?? loaded[0]);
+  }, []);
+
+  const hydrateUser = useCallback(async () => {
+    const [profileResponse, reputationResponse] = await Promise.all([
+      userWalletService.getProfile(),
+      userWalletService.getReputation(),
+    ]);
+    const profile = profileResponse.data?.data as { full_name?: string } | undefined;
+    const reputation = reputationResponse.data?.data as { reputation_score?: number } | undefined;
+    const fullName = profile?.full_name;
+    if (!fullName) return;
+    const initials = fullName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase();
+    setUser((current) => ({
+      ...current,
+      name: fullName,
+      initials: initials || 'AK',
+      reputation: reputation?.reputation_score ?? current.reputation,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!user.isLoggedIn) return;
+    hydrateCircles().catch(() => addToast('Gagal memuat daftar circle dari backend.', 'error'));
+    hydrateUser().catch(() => addToast('Gagal memuat profil dari backend.', 'error'));
+  }, [user.isLoggedIn, hydrateCircles, hydrateUser, addToast]);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((p) => p.filter((t) => t.id !== id));
@@ -889,8 +926,7 @@ export default function App() {
       setOtpOpen(true);
       setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
     } catch {
-      setOtpOpen(true);
-      setTimeout(() => document.getElementById('otp-0')?.focus(), 150);
+      addToast('Nomor telepon belum terdaftar.', 'error');
     } finally {
       setLoading(false);
     }
@@ -907,20 +943,22 @@ export default function App() {
     try {
       setLoading(true);
       const normalizedPhone = normalizePhoneForApi(phone || '81234567890');
-      const res = await userWalletService.verifyOTP(normalizedPhone, otpCode, inviteCode);
+      const res = await userWalletService.verifyOTP(normalizedPhone, otpCode);
 
       const token = res.data?.data?.token || res.data?.token;
       if (token) {
         localStorage.setItem('token', token);
+        if (inviteCode.trim()) await circleService.joinCircle(inviteCode.trim());
+        await hydrateCircles();
         const uData = res.data?.data?.user || res.data?.user;
-        const userName = uData?.full_name || 'Farrel Abda';
+        const userName = uData?.full_name || 'Pengguna';
         const userInitials = userName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 
         setUser({
           isLoggedIn: true,
-          role: 'OWNER',
+          role: 'MEMBER',
           name: userName,
-          initials: userInitials || 'FA',
+          initials: userInitials || 'AK',
           reputation: 98,
         });
 
@@ -931,13 +969,12 @@ export default function App() {
       } else {
         throw new Error('Respon token tidak ditemukan');
       }
-    } catch (err: any) {
-      const serverMsg = err.response?.data?.message || 'Gagal memverifikasi OTP. Pastikan backend Go aktif.';
-      addToast(serverMsg, 'error');
+    } catch {
+      addToast('Gagal memverifikasi OTP. Pastikan backend Go aktif.', 'error');
     } finally {
       setLoading(false);
     }
-  }, [phone, otpValues, inviteCode, addToast]);
+  }, [phone, otpValues, inviteCode, addToast, hydrateCircles]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
@@ -997,9 +1034,12 @@ export default function App() {
   const handleWizardComplete = useCallback(async (name: string, track: TrackType) => {
     try {
       const res = await circleService.createCircle({
-        name,
+        circle_name: name,
         track_type: track,
-        monthly_dues: 1000000,
+        contribution_amount: 1000000,
+        member_limit: 5,
+        period_type: 'MONTHLY',
+        ...(track === 'SPSB' ? { bid_floor_percent: 1, bid_ceiling_percent: 20 } : {}),
       });
 
       const newCircle: CircleState = res.data?.data ? {
@@ -1022,19 +1062,7 @@ export default function App() {
       window.location.hash = SCREEN_TO_HASH[dest];
       addToast(`Circle "${name}" berhasil dibuat di database Supabase!`, 'success');
     } catch {
-      const fallbackCircle: CircleState = {
-        id: 'ARK-' + Math.random().toString(36).slice(2, 6).toUpperCase(),
-        name,
-        trackType: track,
-      };
-      setCircles((p) => [...p, fallbackCircle]);
-      setCircle(fallbackCircle);
-      setUser((u) => ({ ...u, isLoggedIn: true }));
-      setWizardOpen(false);
-      const dest: Screen = track === 'SPSB' ? 'dashboard' : 'spin_wheel';
-      setScreenState(dest);
-      window.location.hash = SCREEN_TO_HASH[dest];
-      addToast(`Circle "${name}" dibuat dalam mode lokal.`, 'info');
+      addToast(`Gagal membuat circle "${name}".`, 'error');
     }
   }, [addToast]);
 
@@ -1060,6 +1088,8 @@ export default function App() {
               onBack={handleLogout}
               onNavigate={handleDashboardNav}
               onOpenPayment={() => openPayment(1_000_000, 'Iuran Bulanan Siklus 4')}
+              circleId={circle.id}
+              circleName={circle.name}
             />
           </ErrorBoundary>
         );
