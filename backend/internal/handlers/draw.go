@@ -34,16 +34,24 @@ func normalizeCycleID(id string) string {
 
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
-
-	participants, meta, err := h.drawService.GetParticipantsPaginated(c.Request.Context(), cycleID, page, pageSize)
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
+	participants, err := h.drawService.GetParticipantsCursor(c.Request.Context(), cycleID, limit+1, cursorTime, cursorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil partisipan: "+err.Error(), nil))
 		return
 	}
-
-	c.JSON(http.StatusOK, dto.BuildPaginatedResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus "+cycleID, participants, meta))
+	var nextCursor any
+	if len(participants) > limit {
+		last := participants[limit-1]
+		nextCursor = encodeWalletCursor(last.CreatedAt, last.ParticipantID)
+		participants = participants[:limit]
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil partisipan siklus "+cycleID, gin.H{"items": participants, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
 
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {

@@ -17,6 +17,7 @@ import (
 
 type DrawService interface {
 	GetParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]repository.ParticipantDB, dto.MetaPagination, error)
+	GetParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ParticipantDB, error)
 	ExecuteCycleDraw(ctx context.Context, cycleID, actorUserID string) (map[string]interface{}, error)
 	SubmitBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ObligationDB, error)
@@ -63,6 +64,10 @@ func (s *drawService) GetParticipantsPaginated(ctx context.Context, cycleID stri
 	}
 
 	return data, meta, nil
+}
+
+func (s *drawService) GetParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ParticipantDB, error) {
+	return s.repo.GetCycleParticipantsCursor(ctx, cycleID, limit, cursorTime, cursorID)
 }
 
 // Eksekusi Pemenang Siklus (Smart Routing: SPSB Auction atau Random Draw)

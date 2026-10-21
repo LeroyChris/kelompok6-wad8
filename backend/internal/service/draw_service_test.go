@@ -28,6 +28,9 @@ type drawRepoStub struct {
 func (s *drawRepoStub) GetCycleParticipantsPaginated(context.Context, string, int, int) ([]repository.ParticipantDB, int64, error) {
 	return nil, 0, nil
 }
+func (s *drawRepoStub) GetCycleParticipantsCursor(context.Context, string, int, *time.Time, string) ([]repository.ParticipantDB, error) {
+	return nil, nil
+}
 func (s *drawRepoStub) GetEligibleParticipants(context.Context, string) ([]repository.ParticipantDB, error) {
 	return s.candidates, nil
 }

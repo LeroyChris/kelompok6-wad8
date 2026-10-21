@@ -11,11 +11,12 @@ import (
 )
 
 type ParticipantDB struct {
-	ParticipantID string `json:"participant_id"`
-	UserID        string `json:"user_id"`
-	Name          string `json:"name"`
-	Initials      string `json:"initials"`
-	Status        string `json:"status"`
+	ParticipantID string    `json:"participant_id"`
+	UserID        string    `json:"user_id"`
+	Name          string    `json:"name"`
+	Initials      string    `json:"initials"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"-"`
 }
 
 type CircleCycleInfo struct {
@@ -88,6 +89,7 @@ type CycleDB struct {
 
 type DrawRepository interface {
 	GetCycleParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]ParticipantDB, int64, error)
+	GetCycleParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ParticipantDB, error)
 	GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error)
 	GetCircleInfoByCycle(ctx context.Context, cycleID string) (*CircleCycleInfo, error)
 	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
@@ -128,7 +130,8 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 			cp.cycle_participant_id,
 			COALESCE(cm.user_id::text, '00000000-0000-0000-0000-000000000000'),
 			COALESCE(u.full_name, 'Anggota'),
-			cp.participation_status
+			cp.participation_status,
+			cp.created_at
 		FROM cycle_participants cp
 		LEFT JOIN circle_memberships cm ON cp.circle_membership_id = cm.circle_membership_id
 		LEFT JOIN users u ON cm.user_id = u.user_id
@@ -146,7 +149,7 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	for rows.Next() {
 		var p ParticipantDB
 		var fullName string
-		if err := rows.Scan(&p.ParticipantID, &p.UserID, &fullName, &p.Status); err != nil {
+		if err := rows.Scan(&p.ParticipantID, &p.UserID, &fullName, &p.Status, &p.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		p.Name = fullName
@@ -159,6 +162,46 @@ func (r *drawRepo) GetCycleParticipantsPaginated(ctx context.Context, cycleID st
 	}
 
 	return list, total, nil
+}
+
+func (r *drawRepo) GetCycleParticipantsCursor(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ParticipantDB, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT cp.cycle_participant_id::text, cm.user_id::text, u.full_name,
+			cp.participation_status, cp.created_at
+		FROM cycle_participants cp
+		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
+		JOIN users u ON u.user_id=cm.user_id
+		WHERE cp.cycle_id=$1
+		  AND ($2::timestamptz IS NULL OR (cp.created_at, cp.cycle_participant_id) > ($2::timestamptz, $3::uuid))
+		ORDER BY cp.created_at ASC, cp.cycle_participant_id ASC
+		LIMIT $4`, cycleID, cursorTime, nullableCursorID(cursorID), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch participants: %w", err)
+	}
+	defer rows.Close()
+	items := make([]ParticipantDB, 0, limit)
+	for rows.Next() {
+		var participant ParticipantDB
+		var fullName string
+		if err := rows.Scan(&participant.ParticipantID, &participant.UserID, &fullName, &participant.Status, &participant.CreatedAt); err != nil {
+			return nil, err
+		}
+		participant.Name = fullName
+		if len(fullName) >= 2 {
+			participant.Initials = string(fullName[0]) + string(fullName[1])
+		} else {
+			participant.Initials = fullName
+		}
+		items = append(items, participant)
+	}
+	return items, rows.Err()
+}
+
+func nullableCursorID(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func (r *drawRepo) GetEligibleParticipants(ctx context.Context, cycleID string) ([]ParticipantDB, error) {
