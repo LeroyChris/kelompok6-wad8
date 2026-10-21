@@ -20,6 +20,8 @@ export const circleService = {
   getPaymentMatrix: async (circleId: string) => {
     return await apiClient.get(`/circles/${circleId}/payment-matrix`);
   },
+  getPaymentProofs: (circleId: string) => apiClient.get(`/circles/${circleId}/payment-proofs`, { params: { status: 'PENDING' } }),
+  reviewPaymentProof: (proofId: string, reviewStatus: 'APPROVED' | 'REJECTED') => apiClient.post(`/payment-proofs/${proofId}/review`, { review_status: reviewStatus }),
 
   // Buat circle baru (Ketua Circle)
   createCircle: async (data: {

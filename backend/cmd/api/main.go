@@ -114,6 +114,7 @@ func main() {
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
 			circles.GET("/:id/payment-matrix", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), paymentHandler.GetPaymentMatrix)
+			circles.GET("/:id/payment-proofs", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), paymentHandler.GetCirclePaymentProofs)
 
 			// Relasi Siklus
 			circles.GET("/:id/cycles", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCircleCycles)

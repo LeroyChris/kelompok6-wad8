@@ -31,6 +31,46 @@ type ReviewProofInput struct {
 	ReviewNote   string `json:"review_note"`
 }
 
+// GetCirclePaymentProofs exposes manual proofs to the circle's owner/admin.
+// Authorization is enforced by the route middleware.
+func (h *PaymentHandler) GetCirclePaymentProofs(c *gin.Context) {
+	status := strings.ToUpper(strings.TrimSpace(c.DefaultQuery("status", "PENDING")))
+	if status != "PENDING" && status != "APPROVED" && status != "REJECTED" {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "status review tidak valid", nil))
+		return
+	}
+	rows, err := h.DB.Query(c.Request.Context(), `
+		SELECT pp.payment_proof_id::text, pp.payment_order_id::text, pp.proof_url,
+			pp.review_status, pp.submitted_at, u.full_name, co.amount_due::float8
+		FROM payment_proofs pp
+		JOIN payment_orders po ON po.payment_order_id=pp.payment_order_id
+		JOIN obligation_payment_orders opo ON opo.payment_order_id=po.payment_order_id
+		JOIN cycle_obligations co ON co.obligation_id=opo.obligation_id
+		JOIN cycle_participants cp ON cp.cycle_participant_id=co.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
+		JOIN users u ON u.user_id=cm.user_id
+		JOIN arisan_cycles ac ON ac.cycle_id=cp.cycle_id
+		WHERE ac.circle_id=$1 AND pp.review_status=$2
+		ORDER BY pp.submitted_at ASC, pp.payment_proof_id ASC`, c.Param("id"), status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil bukti pembayaran", nil))
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var proofID, orderID, proofURL, reviewStatus, fullName string
+		var submittedAt time.Time
+		var amount float64
+		if err := rows.Scan(&proofID, &orderID, &proofURL, &reviewStatus, &submittedAt, &fullName, &amount); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data bukti pembayaran tidak valid", nil))
+			return
+		}
+		items = append(items, gin.H{"payment_proof_id": proofID, "payment_order_id": orderID, "proof_url": proofURL, "review_status": reviewStatus, "submitted_at": submittedAt, "full_name": fullName, "amount": amount})
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar bukti pembayaran berhasil diambil", gin.H{"items": items}))
+}
+
 // advanceCycleAfterCollection moves a fully paid cycle to its next legal state.
 func advanceCycleAfterCollection(ctx context.Context, tx pgx.Tx, obligationID string) error {
 	_, err := tx.Exec(ctx, `
