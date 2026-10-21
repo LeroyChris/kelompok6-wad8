@@ -20,7 +20,10 @@ export default function PaymentModal({ obligationId, amount, onClose, onSuccess 
         await cycleService.uploadProof(orderId, proofUrl.trim());
         setMessage('Bukti transfer dikirim untuk ditinjau owner/admin.'); onSuccess();
       }
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Pembayaran gagal diproses.'); }
+    } catch (error) {
+      const apiMessage = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setMessage(apiMessage ?? 'Pembayaran gagal diproses.');
+    }
     finally { setBusy(false); }
   };
   return <div className="fixed inset-0 z-50 grid place-items-end sm:place-items-center bg-slate-950/40 p-4">
