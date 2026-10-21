@@ -150,35 +150,3 @@ func RequireCycleRole(db *pgxpool.Pool, allowedRoles ...string) gin.HandlerFunc 
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"status": "error", "message": "Role circle tidak memiliki akses untuk aksi ini"})
 	}
 }
-
-func RequireRole(allowedRoles ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		val, exists := c.Get("role")
-		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"code":    http.StatusForbidden,
-				"status":  "error",
-				"message": "Akses ditolak: role pengguna tidak teridentifikasi",
-			})
-			return
-		}
-
-		userRole, ok := val.(string)
-		if !ok {
-			userRole = "MEMBER"
-		}
-
-		for _, allowed := range allowedRoles {
-			if strings.EqualFold(userRole, allowed) {
-				c.Next()
-				return
-			}
-		}
-
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"code":    http.StatusForbidden,
-			"status":  "error",
-			"message": "Akses ditolak: Anda tidak memiliki wewenang (role tidak memenuhi syarat)",
-		})
-	}
-}

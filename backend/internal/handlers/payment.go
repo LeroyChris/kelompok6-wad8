@@ -576,13 +576,6 @@ func (h *PaymentHandler) ReviewPaymentProof(c *gin.Context) {
 	}))
 }
 
-// POST /api/v1/webhooks/payment-gateway
-func (h *PaymentHandler) HandlePaymentGatewayWebhook(c *gin.Context) {
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Webhook diterima", gin.H{
-		"status": "PROCESSED",
-	}))
-}
-
 // GET /api/v1/circles/:id/payment-matrix
 func (h *PaymentHandler) GetPaymentMatrix(c *gin.Context) {
 	limit := circleLimit(c)

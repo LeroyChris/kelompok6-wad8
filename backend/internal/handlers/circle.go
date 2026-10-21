@@ -75,11 +75,6 @@ func circleLimit(c *gin.Context) int {
 	return n
 }
 
-// Group Aliases
-func (h *CircleHandler) CreateGroup(c *gin.Context)    { h.CreateCircle(c) }
-func (h *CircleHandler) GetGroupDetail(c *gin.Context) { h.GetCircleDetail(c) }
-func (h *CircleHandler) JoinGroup(c *gin.Context)      { h.JoinCircle(c) }
-
 // CreateCircle membuat circle privat, menetapkan owner, dan membuat undangan
 // awal. Cycle baru hanya dibuat setelah owner mengunci circle yang penuh.
 func (h *CircleHandler) CreateCircle(c *gin.Context) {
