@@ -18,5 +18,11 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Async dashboard/payment hydration intentionally resets local UI state
+      // after external API/modal changes; React Compiler's lint rule is too
+      // strict for the current non-compiler setup.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

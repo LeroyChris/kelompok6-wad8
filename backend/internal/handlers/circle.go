@@ -47,6 +47,9 @@ type UpdateMemberInput struct {
 	Role   string `json:"role"`
 	Status string `json:"status"`
 }
+type UpdateCircleInput struct {
+	CircleName string `json:"circle_name" binding:"required"`
+}
 
 func circleInviteCode() (string, error) {
 	bytes := make([]byte, 6)
