@@ -228,6 +228,9 @@ func (s *drawService) SubmitBid(ctx context.Context, cycleID, userID string, bid
 	if info.CycleStatus != "BIDDING_OPEN" {
 		return errors.New("bidding tidak sedang dibuka untuk siklus ini")
 	}
+	if info.BiddingOpenAt == nil || info.BiddingCloseAt == nil || time.Now().Before(*info.BiddingOpenAt) || !time.Now().Before(*info.BiddingCloseAt) {
+		return errors.New("window bidding tidak aktif untuk siklus ini")
+	}
 
 	if info.BidFloorPercent != nil && bidRate < *info.BidFloorPercent {
 		return fmt.Errorf("tawaran minimal adalah %.2f%% sesuai batas bawah (bid floor) kelompok", *info.BidFloorPercent)

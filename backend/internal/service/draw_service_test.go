@@ -143,6 +143,10 @@ func TestSubmitBidRules(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			if test.info.CycleStatus == "BIDDING_OPEN" && test.info.TrackType == "SPSB" {
+				opened, closes := time.Now().Add(-time.Minute), time.Now().Add(time.Minute)
+				test.info.BiddingOpenAt, test.info.BiddingCloseAt = &opened, &closes
+			}
 			repo := &drawRepoStub{info: &test.info}
 			err := NewDrawService(repo).SubmitBid(context.Background(), "cycle", "user", test.bid)
 			if (err != nil) != test.wantError {

@@ -35,7 +35,9 @@ type ReviewProofInput struct {
 func advanceCycleAfterCollection(ctx context.Context, tx pgx.Tx, obligationID string) error {
 	_, err := tx.Exec(ctx, `
 		UPDATE arisan_cycles ac
-		SET cycle_status = CASE WHEN c.track_type = 'SPSB' THEN 'BIDDING_OPEN' ELSE 'READY_FOR_DISBURSEMENT' END
+		SET cycle_status = CASE WHEN c.track_type = 'SPSB' THEN 'BIDDING_OPEN' ELSE 'READY_FOR_DISBURSEMENT' END,
+			bidding_open_at = CASE WHEN c.track_type = 'SPSB' THEN CURRENT_TIMESTAMP ELSE ac.bidding_open_at END,
+			bidding_close_at = CASE WHEN c.track_type = 'SPSB' THEN ac.due_at ELSE ac.bidding_close_at END
 		FROM circles c
 		WHERE ac.circle_id = c.circle_id
 		  AND ac.cycle_status = 'PAYMENT_COLLECTION'

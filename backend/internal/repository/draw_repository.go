@@ -19,15 +19,17 @@ type ParticipantDB struct {
 }
 
 type CircleCycleInfo struct {
-	CircleID           string   `json:"circle_id"`
-	CircleName         string   `json:"circle_name"`
-	TrackType          string   `json:"track_type"`
-	ContributionAmount float64  `json:"contribution_amount"`
-	MemberLimit        int      `json:"member_limit"`
-	BidFloorPercent    *float64 `json:"bid_floor_percent"`
-	BidCeilingPercent  *float64 `json:"bid_ceiling_percent"`
-	CycleNumber        int      `json:"cycle_number"`
-	CycleStatus        string   `json:"cycle_status"`
+	CircleID           string     `json:"circle_id"`
+	CircleName         string     `json:"circle_name"`
+	TrackType          string     `json:"track_type"`
+	ContributionAmount float64    `json:"contribution_amount"`
+	MemberLimit        int        `json:"member_limit"`
+	BidFloorPercent    *float64   `json:"bid_floor_percent"`
+	BidCeilingPercent  *float64   `json:"bid_ceiling_percent"`
+	CycleNumber        int        `json:"cycle_number"`
+	CycleStatus        string     `json:"cycle_status"`
+	BiddingOpenAt      *time.Time `json:"bidding_open_at"`
+	BiddingCloseAt     *time.Time `json:"bidding_close_at"`
 }
 
 type BidEntry struct {
@@ -216,7 +218,9 @@ func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*C
 			c.bid_floor_percent,
 			c.bid_ceiling_percent,
 			ac.cycle_number,
-			ac.cycle_status
+			ac.cycle_status,
+			ac.bidding_open_at,
+			ac.bidding_close_at
 		FROM arisan_cycles ac
 		JOIN circles c ON c.circle_id = ac.circle_id
 		WHERE ac.cycle_id = $1;
@@ -232,6 +236,8 @@ func (r *drawRepo) GetCircleInfoByCycle(ctx context.Context, cycleID string) (*C
 		&info.BidCeilingPercent,
 		&info.CycleNumber,
 		&info.CycleStatus,
+		&info.BiddingOpenAt,
+		&info.BiddingCloseAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -629,6 +635,26 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	var circleStatus string
+	var expectedCycleNumber int
+	err = tx.QueryRow(ctx, `
+		SELECT c.circle_status,
+			(SELECT COALESCE(MAX(ac.cycle_number), 0) + 1 FROM arisan_cycles ac WHERE ac.circle_id=c.circle_id)
+		FROM circles c
+		WHERE c.circle_id=$1
+		FOR UPDATE`, circleID).Scan(&circleStatus, &expectedCycleNumber)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errors.New("circle tidak ditemukan")
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to lock circle: %w", err)
+	}
+	if circleStatus != "LOCKED" && circleStatus != "RUNNING" {
+		return "", errors.New("circle harus LOCKED atau RUNNING sebelum cycle dibuat")
+	}
+	if cycleNumber != expectedCycleNumber {
+		return "", fmt.Errorf("cycle_number harus %d", expectedCycleNumber)
+	}
 
 	var cycleID string
 	insertCycleQuery := `
@@ -670,6 +696,9 @@ func (r *drawRepo) OpenCycleWithParticipantsAndObligations(ctx context.Context, 
 	`
 	if _, err := tx.Exec(ctx, insertObligationsQuery, cycleID, dueAt); err != nil {
 		return "", fmt.Errorf("failed to generate cycle obligations: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE circles SET circle_status='RUNNING' WHERE circle_id=$1 AND circle_status='LOCKED'`, circleID); err != nil {
+		return "", fmt.Errorf("failed to start circle: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
