@@ -400,7 +400,7 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		INSERT INTO disbursements (
 			award_id, provider, requested_amount, platform_fee_amount, net_amount, disbursement_status, requested_at, completed_at
 		)
-		VALUES ($1, 'IN_APP_WALLET', $2, 0.00, $3, 'PAID', NOW(), NOW());
+		VALUES ($1, 'IN_APP_WALLET', $2, $2 - $3, $3, 'PAID', NOW(), NOW());
 	`
 	if _, err := tx.Exec(ctx, insertDisbursementQuery, awardID, grossAmount, netAmount); err != nil {
 		return "", fmt.Errorf("failed to record disbursement: %w", err)
