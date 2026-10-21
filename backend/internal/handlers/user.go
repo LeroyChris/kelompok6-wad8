@@ -148,16 +148,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Data profil tidak valid", nil))
 		return
 	}
-	if strings.TrimSpace(req.FullName) == "" && strings.TrimSpace(req.Email) == "" {
+	if strings.TrimSpace(req.FullName) == "" {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "full_name wajib diisi", nil))
-		return
-	}
-	if req.PhoneNumber != "" {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nomor telepon tidak dapat diubah melalui profil", nil))
-		return
-	}
-	if strings.TrimSpace(req.Email) != "" {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Email login tidak dapat diubah melalui profil", nil))
 		return
 	}
 
