@@ -135,7 +135,7 @@ func (h *UserHandler) GetWinHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Riwayat kemenangan berhasil didapatkan", history))
 }
 
-// UpdateProfile updates mutable profile fields. Phone number remains the OTP identity.
+// UpdateProfile updates mutable profile fields.
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {

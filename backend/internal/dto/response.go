@@ -119,3 +119,12 @@ type BidResponse struct {
 	BidRatePercent float64 `json:"bid_rate_percent"`
 	BidStatus      string  `json:"bid_status"`
 }
+
+type CircleMemberItem struct {
+	UserID           string `json:"user_id"`
+	FullName         string `json:"full_name"`
+	Email            string `json:"email"`
+	MembershipRole   string `json:"membership_role"`
+	MembershipStatus string `json:"membership_status"`
+	JoinedAt         string `json:"joined_at"`
+}

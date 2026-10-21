@@ -1,25 +1,43 @@
-import API from './api';
-
-export interface CreateCirclePayload {
-  name: string;
-  track_type: 'SPSB' | 'RANDOM_DRAW'; // ✅ SUDAH DISINKRONKAN KE DB
-  monthly_dues: number;
-}
+import apiClient from './api';
 
 export const circleService = {
-  // POST /api/v1/circles - Membuat kelompok arisan baru
-  createCircle: (payload: CreateCirclePayload) => 
-    API.post('/circles', payload),
+  // Ambil daftar circle yang diikuti oleh user
+  getUserCircles: async () => {
+    return await apiClient.get('/circles');
+  },
 
-  // GET /api/v1/circles - Menampilkan daftar kelompok arisan milik pengguna
-  getCircles: () => 
-    API.get('/circles'),
+  // Detail circle spesifik
+  getCircleDetail: async (circleId: string) => {
+    return await apiClient.get(`/circles/${circleId}`);
+  },
 
-  // POST /api/v1/circles/join - Bergabung via kode undangan
-  joinCircle: (invite_code: string) => 
-    API.post('/circles/join', { invite_code }),
+  // Daftar anggota circle
+  getCircleMembers: async (circleId: string) => {
+    return await apiClient.get(`/circles/${circleId}/members`);
+  },
 
-  // GET /api/v1/circles/:id/payment-matrix - Menyuplai data matriks status pembayaran
-  getPaymentMatrix: (circleId: string) => 
-    API.get(`/circles/${circleId}/payment-matrix`),
+  // Matriks pembayaran circle
+  getPaymentMatrix: async (circleId: string) => {
+    return await apiClient.get(`/circles/${circleId}/payment-matrix`);
+  },
+
+  // Buat circle baru (Ketua Circle)
+  createCircle: async (data: {
+    circle_name: string;
+    track_type: string;
+    contribution_amount: number;
+    member_limit: number;
+  }) => {
+    return await apiClient.post('/circles', data);
+  },
+
+  // Gabung circle via kode undangan (Anggota)
+  joinCircle: async (inviteCode: string) => {
+    return await apiClient.post('/circles/join', { invite_code: inviteCode });
+  },
+
+  // Keluar dari Circle (Fitur Baru)
+  leaveCircle: async (circleId: string) => {
+    return await apiClient.post(`/circles/${circleId}/leave`);
+  },
 };

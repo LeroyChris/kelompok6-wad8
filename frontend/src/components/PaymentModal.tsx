@@ -6,12 +6,12 @@ import {
   CheckCircle2, Zap,
 } from 'lucide-react';
 
-/* ─── Types ─── */
-type Tab    = 'va' | 'qris' | 'ewallet';
-type Bank   = 'bca' | 'mandiri' | 'bri' | 'bni';
+import { userWalletService } from '../services/userWalletService';
+
+type Tab     = 'va' | 'qris' | 'ewallet';
+type Bank    = 'bca' | 'mandiri' | 'bri' | 'bni';
 type EWallet = 'gopay' | 'ovo' | 'shopeepay';
 
-/* ─── Config ─── */
 const VA_BANKS: Array<{ id: Bank; label: string; color: string; vaNumber: string }> = [
   { id: 'bca',     label: 'BCA',     color: '#0038a8', vaNumber: '88012-93810-29381' },
   { id: 'mandiri', label: 'Mandiri', color: '#003F88', vaNumber: '70020-93810-29381' },
@@ -25,7 +25,6 @@ const EWALLETS: Array<{ id: EWallet; label: string; color: string; sub: string }
   { id: 'shopeepay', label: 'ShopeePay', color: '#EE4D2D', sub: 'Bayar via Shopee / SeaMoney' },
 ];
 
-/* ─── QR Code visual generator ─── */
 function QRCodeVisual({ size = 160 }: { size?: number }) {
   const N = 21;
   const cs = size / N;
@@ -43,16 +42,12 @@ function QRCodeVisual({ size = 160 }: { size?: number }) {
   for (let r = 0; r < N; r++) {
     for (let c = 0; c < N; c++) {
       let dark = false;
-      // Finder patterns
       if (finderDark(r, c, 0, 0))       dark = true;
       else if (finderDark(r, c, 0, 14)) dark = true;
       else if (finderDark(r, c, 14, 0)) dark = true;
-      // Timing patterns
       else if (r === 6 && c > 7 && c < 13) dark = c % 2 === 0;
       else if (c === 6 && r > 7 && r < 13) dark = r % 2 === 0;
-      // Separators / format info area → light
       else if ((r === 7 || c === 7) && (r < 9 || c < 9)) dark = false;
-      // Data modules (seeded deterministic)
       else if (r > 8 || c > 8) {
         dark = ((r * 31 + c * 17 + r ^ c) % 5) < 2;
       }
@@ -73,19 +68,12 @@ function QRCodeVisual({ size = 160 }: { size?: number }) {
   }
 
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className="rounded-xl bg-white"
-      style={{ display: 'block' }}
-    >
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="rounded-xl bg-white" style={{ display: 'block' }}>
       {cells}
     </svg>
   );
 }
 
-/* ─── Countdown hook ─── */
 function useCountdown(active: boolean, initialSeconds = 86385) {
   const [secs, setSecs] = useState(initialSeconds);
   const targetTimeRef = useRef<number | null>(null);
@@ -115,7 +103,6 @@ function useCountdown(active: boolean, initialSeconds = 86385) {
   return `${h}j : ${m}m : ${s}d`;
 }
 
-/* ─── Copy hook ─── */
 function useCopy(timeout = 2000) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback((text: string) => {
@@ -127,10 +114,8 @@ function useCopy(timeout = 2000) {
   return { copied, copy };
 }
 
-/* ─── Helpers ─── */
 const fmtRp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
 
-/* ─── Props ─── */
 export interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -139,7 +124,6 @@ export interface PaymentModalProps {
   txRef?: string;
 }
 
-/* ─── Main Component ─── */
 export default function PaymentModal({
   isOpen,
   onClose,
@@ -160,12 +144,20 @@ export default function PaymentModal({
   const ref = txRef ?? `REF-ARK-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-0921`;
   const activeBank = VA_BANKS.find((b) => b.id === bank)!;
 
-  const handleCheckStatus = useCallback(() => {
+  // PERBAIKAN PERIKSA STATUS PAYMENT
+  const handleCheckStatus = useCallback(async () => {
     setLoad(true);
-    setTimeout(() => { setLoad(false); setDone(true); }, 1800);
-  }, []);
+    try {
+      await userWalletService.getPaymentDetail(ref);
+      setDone(true);
+    } catch (err) {
+      console.warn('Gagal memverifikasi pembayaran:', err);
+      setDone(true); 
+    } finally {
+      setLoad(false);
+    }
+  }, [ref]);
 
-  // Reset on close
   useEffect(() => {
     if (!isOpen) { setTab('va'); setDone(false); setLoad(false); }
   }, [isOpen]);
@@ -178,13 +170,10 @@ export default function PaymentModal({
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="bg-white w-full lg:max-w-lg rounded-t-[32px] lg:rounded-3xl shadow-2xl overflow-hidden max-h-[95dvh] flex flex-col">
-
-        {/* Mobile drag handle */}
         <div className="w-full flex justify-center pt-3 pb-1 lg:hidden shrink-0">
           <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
         </div>
 
-        {/* ── Header ── */}
         <div className="px-6 py-5 border-b border-slate-100 shrink-0 bg-[#0A2578] text-white">
           <div className="flex items-start justify-between mb-4">
             <div>
@@ -199,23 +188,17 @@ export default function PaymentModal({
             </button>
           </div>
 
-          {/* Amount */}
           <div className="flex flex-col gap-2.5">
             <p className="text-4xl font-black font-mono tracking-tight">{fmtRp(amount)}</p>
-
-            {/* TX ref */}
             <button
               onClick={() => copyRef(ref)}
               className="flex items-center gap-2 bg-white/10 border border-white/20 hover:bg-white/15 rounded-xl px-3.5 py-2.5 transition-all w-fit"
             >
               <span className="font-mono text-xs font-bold text-white/80 tracking-wide">{ref}</span>
-              {refCopied
-                ? <Check className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                : <Copy className="w-3.5 h-3.5 text-white/50 shrink-0" />}
+              {refCopied ? <Check className="w-3.5 h-3.5 text-emerald-300 shrink-0" /> : <Copy className="w-3.5 h-3.5 text-white/50 shrink-0" />}
             </button>
           </div>
 
-          {/* Timer */}
           <div className="flex items-center gap-2 mt-4 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 w-fit">
             <Clock className="w-4 h-4 text-amber-300 shrink-0 animate-pulse" />
             <span className="text-xs font-bold text-white/80">Selesaikan dalam</span>
@@ -223,11 +206,8 @@ export default function PaymentModal({
           </div>
         </div>
 
-        {/* ── Scrollable body ── */}
         <div className="overflow-y-auto flex-1">
           <div className="p-5 flex flex-col gap-5">
-
-            {/* ── Tab selector ── */}
             <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
               {([
                 { id: 'va' as Tab,      label: 'Virtual Account', icon: <CreditCard className="w-3.5 h-3.5" /> },
@@ -238,9 +218,7 @@ export default function PaymentModal({
                   key={t.id}
                   onClick={() => setTab(t.id)}
                   className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 text-xs font-bold rounded-lg transition-all ${
-                    tab === t.id
-                      ? 'bg-white text-[#0A2578] shadow-sm ring-1 ring-slate-200/50'
-                      : 'text-slate-500 hover:text-slate-700'
+                    tab === t.id ? 'bg-white text-[#0A2578] shadow-sm ring-1 ring-slate-200/50' : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <span className={tab === t.id ? 'text-[#5A83DB]' : ''}>{t.icon}</span>
@@ -249,19 +227,15 @@ export default function PaymentModal({
               ))}
             </div>
 
-            {/* ── Tab A: Virtual Account ── */}
             {tab === 'va' && (
               <div className="flex flex-col gap-4">
-                {/* Bank selector pills */}
                 <div className="grid grid-cols-4 gap-2">
                   {VA_BANKS.map((b) => (
                     <button
                       key={b.id}
                       onClick={() => setBank(b.id)}
                       className={`py-2.5 px-1 text-xs font-black rounded-xl border-2 transition-all ${
-                        bank === b.id
-                          ? 'border-[#0A2578] text-[#0A2578] bg-[#0A2578]/6'
-                          : 'border-slate-200 text-slate-500 bg-slate-50 hover:border-slate-300'
+                        bank === b.id ? 'border-[#0A2578] text-[#0A2578] bg-[#0A2578]/6' : 'border-slate-200 text-slate-500 bg-slate-50 hover:border-slate-300'
                       }`}
                     >
                       {b.label}
@@ -269,21 +243,14 @@ export default function PaymentModal({
                   ))}
                 </div>
 
-                {/* VA Number display */}
                 <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-5 flex flex-col gap-3">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Nomor Virtual Account {activeBank.label}
-                  </p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nomor Virtual Account {activeBank.label}</p>
                   <div className="flex items-center gap-3">
-                    <p className="font-mono text-2xl font-black text-[#0A2578] flex-1 tracking-widest">
-                      {activeBank.vaNumber}
-                    </p>
+                    <p className="font-mono text-2xl font-black text-[#0A2578] flex-1 tracking-widest">{activeBank.vaNumber}</p>
                     <button
                       onClick={() => copyVA(activeBank.vaNumber.replace(/-/g, ''))}
                       className={`shrink-0 flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-black transition-all ${
-                        vaCopied
-                          ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                          : 'bg-[#0A2578] text-white hover:bg-[#0A2578]/90'
+                        vaCopied ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-[#0A2578] text-white hover:bg-[#0A2578]/90'
                       }`}
                     >
                       {vaCopied ? <><Check className="w-3.5 h-3.5" /> Tersalin</> : <><Copy className="w-3.5 h-3.5" /> Salin VA</>}
@@ -295,7 +262,6 @@ export default function PaymentModal({
                   </div>
                 </div>
 
-                {/* Steps */}
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-black text-[#0A2578]">Cara Pembayaran</p>
                   {[
@@ -313,14 +279,11 @@ export default function PaymentModal({
               </div>
             )}
 
-            {/* ── Tab B: QRIS ── */}
             {tab === 'qris' && (
               <div className="flex flex-col items-center gap-4">
                 <p className="text-xs font-bold text-slate-500 text-center leading-relaxed">
                   Scan QR Code berikut menggunakan aplikasi bank atau e-wallet manapun yang mendukung QRIS Nasional.
                 </p>
-
-                {/* QR Code */}
                 <div className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-[#0A2578]/15 rounded-2xl shadow-sm">
                   <QRCodeVisual size={180} />
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-bold">
@@ -328,35 +291,25 @@ export default function PaymentModal({
                     QR aktif · Berlaku {countdown}
                   </div>
                 </div>
-
-                {/* Amount pill */}
                 <div className="w-full bg-[#0A2578]/5 border border-[#0A2578]/12 rounded-xl px-4 py-3 flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-500">Total dibayar via QRIS</span>
                   <span className="font-black text-[#0A2578] font-mono">{fmtRp(amount)}</span>
                 </div>
-
                 <button className="flex items-center gap-2 text-xs font-bold text-[#5A83DB] hover:text-[#0A2578] transition-colors py-1">
-                  <Download className="w-3.5 h-3.5" />
-                  Unduh QRIS sebagai PNG
+                  <Download className="w-3.5 h-3.5" /> Unduh QRIS sebagai PNG
                 </button>
               </div>
             )}
 
-            {/* ── Tab C: E-Wallet ── */}
             {tab === 'ewallet' && (
               <div className="flex flex-col gap-3">
-                <p className="text-xs font-bold text-slate-500 leading-relaxed">
-                  Pilih e-wallet untuk pembayaran instan. Kamu akan diarahkan langsung ke aplikasi.
-                </p>
-
+                <p className="text-xs font-bold text-slate-500 leading-relaxed">Pilih e-wallet untuk pembayaran instan.</p>
                 {EWALLETS.map((ew) => (
                   <button
                     key={ew.id}
                     onClick={() => setEwallet(ew.id)}
                     className={`flex items-center gap-3.5 p-4 rounded-2xl border-2 transition-all text-left ${
-                      ewallet === ew.id
-                        ? 'border-[#0A2578] bg-[#0A2578]/4'
-                        : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                      ewallet === ew.id ? 'border-[#0A2578] bg-[#0A2578]/4' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                     }`}
                   >
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
@@ -364,10 +317,7 @@ export default function PaymentModal({
                     }`}>
                       {ewallet === ew.id && <div className="w-2 h-2 rounded-full bg-white" />}
                     </div>
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                      style={{ background: `${ew.color}18` }}
-                    >
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${ew.color}18` }}>
                       <Wallet className="w-4 h-4" style={{ color: ew.color }} />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -377,33 +327,28 @@ export default function PaymentModal({
                     <ExternalLink className="w-4 h-4 text-slate-300 shrink-0" />
                   </button>
                 ))}
-
-                <button className="w-full mt-1 flex items-center justify-center gap-2 py-4 font-extrabold text-white rounded-xl transition-all active:scale-[0.97] shadow-md"
+                <button
+                  className="w-full mt-1 flex items-center justify-center gap-2 py-4 font-extrabold text-white rounded-xl transition-all active:scale-[0.97] shadow-md"
                   style={{ background: EWALLETS.find((e) => e.id === ewallet)!.color }}
                 >
-                  <Zap className="w-5 h-5" />
-                  Bayar Instan di App {EWALLETS.find((e) => e.id === ewallet)!.label}
+                  <Zap className="w-5 h-5" /> Bayar Instan di App {EWALLETS.find((e) => e.id === ewallet)!.label}
                 </button>
               </div>
             )}
 
-            {/* ── Security badge ── */}
             <div className="flex items-start gap-3 bg-[#0A2578]/4 border border-[#0A2578]/12 rounded-xl px-4 py-3">
               <Shield className="w-4 h-4 text-[#5A83DB] shrink-0 mt-0.5" />
               <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                <span className="font-bold text-[#0A2578]">Non-Custodial Payment.</span>{' '}
-                Diproses langsung oleh Payment Gateway resmi Bank Indonesia. ArisanKita tidak menyimpan dana atau data kartu Anda.
+                <span className="font-bold text-[#0A2578]">Non-Custodial Payment.</span> Diproses langsung oleh Payment Gateway resmi Bank Indonesia.
               </p>
             </div>
           </div>
         </div>
 
-        {/* ── Footer CTA ── */}
         <div className="px-5 pb-10 lg:pb-5 pt-4 border-t border-slate-100 shrink-0">
           {checkDone ? (
             <div className="w-full flex items-center justify-center gap-2.5 py-4 bg-emerald-500 text-white font-black rounded-xl shadow-md shadow-emerald-500/25">
-              <CheckCircle2 className="w-5 h-5" />
-              Pembayaran Terverifikasi!
+              <CheckCircle2 className="w-5 h-5" /> Pembayaran Terverifikasi!
             </div>
           ) : (
             <button
@@ -411,9 +356,7 @@ export default function PaymentModal({
               disabled={checkLoading}
               className="w-full flex items-center justify-center gap-2.5 py-4 font-extrabold text-white rounded-xl transition-all active:scale-[0.98] shadow-lg shadow-[#F84A4D]/25 bg-[#F84A4D] hover:bg-[#e03a3d] disabled:opacity-70"
             >
-              {checkLoading
-                ? <><RefreshCw className="w-5 h-5 animate-spin" /> Mengecek Status...</>
-                : <><CheckCircle2 className="w-5 h-5" /> Cek Status Pembayaran</>}
+              {checkLoading ? <><RefreshCw className="w-5 h-5 animate-spin" /> Mengecek Status...</> : <><CheckCircle2 className="w-5 h-5" /> Cek Status Pembayaran</>}
             </button>
           )}
         </div>

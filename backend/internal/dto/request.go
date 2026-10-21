@@ -1,5 +1,16 @@
 package dto
 
+// DTO untuk Request OTP via Email
+type RequestEmailOTPRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+// DTO untuk Verifikasi OTP via Email
+type VerifyEmailOTPRequest struct {
+	Email string `json:"email" binding:"required,email"`
+	OTP   string `json:"otp" binding:"required,len=6"`
+}
+
 // DTO untuk Register User
 type RegisterRequest struct {
 	PhoneNumber string `json:"phone_number" binding:"required"`
@@ -8,10 +19,10 @@ type RegisterRequest struct {
 	Password    string `json:"password" binding:"required,min=6"`
 }
 
-// DTO untuk Login User
+// DTO untuk Login User (Legacy/Password)
 type LoginRequest struct {
-	PhoneNumber string `json:"phone_number" binding:"required"`
-	Password    string `json:"password" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
 }
 
 // DTO untuk Pembuatan Circle Baru

@@ -8,22 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// UserRepository menangani query Raw SQL untuk tabel users & wallets
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindByID(ctx context.Context, userID string) (*models.User, error)
 	Update(ctx context.Context, user *models.User) error
+	CreateUser(ctx context.Context, email string, fullName string) (*models.User, error) // TAMBAHAN PENTING
 
-	// Query 1.5 & 1.6 untuk Fitur Wallet (Track 1)
 	GetUserWalletByID(ctx context.Context, userID string) (*models.UserWallet, error)
 	GetWalletTransactionsByUserID(ctx context.Context, userID string) ([]models.WalletTransaction, error)
-
-	// Query 1.7 Top-Up Saldo Sandbox (Track 1)
 	TopUpBalanceSandbox(ctx context.Context, userID string, amount float64) error
-
-	// Query 1.2 Registrasi Identitas Autentikasi / OTP Mock (Track 1)
-	CreateAuthIdentity(ctx context.Context, userID, identityType, identifier string) error
+	CreateAuthIdentity(ctx context.Context, userID, provider, providerSubject string) error
 }
 
 type userRepository struct {
@@ -34,7 +29,27 @@ func NewUserRepository(db *pgxpool.Pool) UserRepository {
 	return &userRepository{db: db}
 }
 
-// 1.1 Registrasi User Baru
+// Implementation CreateUser
+func (r *userRepository) CreateUser(ctx context.Context, email string, fullName string) (*models.User, error) {
+	var user models.User
+	query := `
+		INSERT INTO users (full_name, email, account_status)
+		VALUES ($1, $2, 'ACTIVE')
+		RETURNING user_id, full_name, email, account_status, created_at;
+	`
+	err := r.db.QueryRow(ctx, query, fullName, email).Scan(
+		&user.UserID,
+		&user.FullName,
+		&user.Email,
+		&user.AccountStatus,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *userRepository) Create(ctx context.Context, user *models.User) error {
 	query := `
 		INSERT INTO users (full_name, phone_number, email, account_status)
@@ -51,7 +66,6 @@ func (r *userRepository) Create(ctx context.Context, user *models.User) error {
 	)
 }
 
-// Cari User berdasarkan Email (Login / Validasi)
 func (r *userRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	query := `
 		SELECT user_id, full_name, phone_number, email, account_status, created_at
@@ -73,7 +87,6 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*models
 	return &user, nil
 }
 
-// 1.3 Ambil Profil User Lengkap & Ringkasan Kemenangan (GET /api/v1/users/me)
 func (r *userRepository) FindByID(ctx context.Context, userID string) (*models.User, error) {
 	query := `
 		SELECT
@@ -110,7 +123,6 @@ func (r *userRepository) FindByID(ctx context.Context, userID string) (*models.U
 	return &user, nil
 }
 
-// Update Profil User
 func (r *userRepository) Update(ctx context.Context, user *models.User) error {
 	query := `
 		UPDATE users
@@ -121,14 +133,12 @@ func (r *userRepository) Update(ctx context.Context, user *models.User) error {
 	return r.db.QueryRow(ctx, query, user.FullName, user.PhoneNumber, user.UserID).Scan(&user.UpdatedAt)
 }
 
-// 1.5 Cek Saldo Dompet In-App (GET /api/v1/wallet)
 func (r *userRepository) GetUserWalletByID(ctx context.Context, userID string) (*models.UserWallet, error) {
 	query := `
 		SELECT wallet_id, user_id, balance, created_at, updated_at
 		FROM user_wallets
 		WHERE user_id = $1;
 	`
-
 	var wallet models.UserWallet
 	err := r.db.QueryRow(ctx, query, userID).Scan(
 		&wallet.WalletID,
@@ -137,15 +147,12 @@ func (r *userRepository) GetUserWalletByID(ctx context.Context, userID string) (
 		&wallet.CreatedAt,
 		&wallet.UpdatedAt,
 	)
-
 	if err != nil {
 		return nil, err
 	}
-
 	return &wallet, nil
 }
 
-// 1.6 Ambil Riwayat Mutasi Dompet (GET /api/v1/wallet/transactions)
 func (r *userRepository) GetWalletTransactionsByUserID(ctx context.Context, userID string) ([]models.WalletTransaction, error) {
 	query := `
 		SELECT 
@@ -161,7 +168,6 @@ func (r *userRepository) GetWalletTransactionsByUserID(ctx context.Context, user
 		WHERE uw.user_id = $1
 		ORDER BY wt.created_at DESC;
 	`
-
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
 		return nil, err
@@ -185,11 +191,9 @@ func (r *userRepository) GetWalletTransactionsByUserID(ctx context.Context, user
 		}
 		transactions = append(transactions, tx)
 	}
-
 	return transactions, nil
 }
 
-// 1.7 Top-up Saldo Sandbox (POST /api/v1/wallet/topup-sandbox)
 func (r *userRepository) TopUpBalanceSandbox(ctx context.Context, userID string, amount float64) error {
 	query := `
 		UPDATE user_wallets 
@@ -197,14 +201,9 @@ func (r *userRepository) TopUpBalanceSandbox(ctx context.Context, userID string,
 		WHERE user_id = $2;
 	`
 	_, err := r.db.Exec(ctx, query, amount, userID)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
-// 1.2 Simpan identitas autentikasi yang sesuai dengan schema user_auth_identities.
 func (r *userRepository) CreateAuthIdentity(ctx context.Context, userID, provider, providerSubject string) error {
 	query := `
 		INSERT INTO user_auth_identities (user_id, provider, provider_subject)
