@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 // PaymentOrder merepresentasikan order pembayaran di tabel payment_orders
 type PaymentOrder struct {
