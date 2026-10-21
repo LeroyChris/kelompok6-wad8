@@ -17,12 +17,14 @@ export default function Dashboard({ circleId, role, onNavigate }: { circleId: st
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [proofs, setProofs] = useState<PaymentProof[]>([]);
+  const [myUserId, setMyUserId] = useState('');
   const cycle = cycles.find((item) => !['COMPLETED', 'CANCELLED'].includes(item.cycle_status)) ?? cycles[0] ?? null;
 	const noActiveCycle = !cycles.some((item) => !['COMPLETED', 'CANCELLED'].includes(item.cycle_status));
   const load = useCallback(async () => {
     try {
       setError('');
-      const [detailResponse, walletResponse, cyclesResponse] = await Promise.all([circleService.getCircleDetail(circleId), userWalletService.getWalletBalance(), cycleService.getCycles(circleId)]);
+      const [detailResponse, walletResponse, cyclesResponse, profileResponse] = await Promise.all([circleService.getCircleDetail(circleId), userWalletService.getWalletBalance(), cycleService.getCycles(circleId), userWalletService.getProfile()]);
+      setMyUserId(profileResponse.data?.data?.user_id ?? '');
       setDetail(detailResponse.data?.data ?? null);
       setBalance(walletResponse.data?.data?.balance ?? 0);
       const listed = (cyclesResponse.data?.data?.items ?? []) as Cycle[];
@@ -54,7 +56,8 @@ export default function Dashboard({ circleId, role, onNavigate }: { circleId: st
     catch { setError('Bukti pembayaran tidak dapat ditinjau.'); }
     finally { setBusy(false); }
   };
-  const unpaid = obligations.find((item) => item.status !== 'PAID');
+  const myObligations = obligations.filter((item) => item.user_id === myUserId);
+  const unpaid = myObligations.find((item) => item.status !== 'PAID');
   const owner = role === 'OWNER';
   return <section className="p-4 sm:p-6">
     <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-slate-500">Circle</p><h1 className="text-2xl font-black text-slate-800">{detail?.circle_name ?? 'Memuat…'}</h1></div>{detail?.invite_code && <code className="rounded-lg bg-slate-200 px-3 py-2 text-xs font-bold text-slate-700">Invite: {detail.invite_code}</code>}</div>

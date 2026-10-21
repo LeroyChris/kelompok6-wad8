@@ -1,63 +1,8 @@
 package dto
 
-// DTO untuk Request OTP via Email
-type RequestEmailOTPRequest struct {
-	Email string `json:"email" binding:"required,email"`
-}
-
-// DTO untuk Verifikasi OTP via Email
-type VerifyEmailOTPRequest struct {
-	Email string `json:"email" binding:"required,len=6"`
-}
-
-// DTO untuk Register User
-type RegisterRequest struct {
-	PhoneNumber string `json:"phone_number" binding:"required"`
-	FullName    string `json:"full_name" binding:"required"`
-	Email       string `json:"email" binding:"required,email"`
-	Password    string `json:"password" binding:"required,min=6"`
-}
-
-// DTO untuk Login User
-type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
-}
-
-// DTO untuk Pembuatan Circle Baru
-type CreateCircleRequest struct {
-	CircleName  string  `json:"circle_name" binding:"required"`
-	TrackType   string  `json:"track_type" binding:"required"` // 'SPSB' / 'RANDOM_DRAW'
-	MonthlyDues float64 `json:"monthly_dues" binding:"required,gt=0"`
-	MaxMembers  int     `json:"max_members" binding:"required,gt=1"`
-}
-
-// DTO untuk Penawaran Lelang SPSB (Track A)
-type SubmitBidRequest struct {
-	BidRatePercent float64 `json:"bid_rate_percent" binding:"required,gte=0,lte=100"`
-}
-
-// DTO untuk Kampanye Patungan Internal
-type CreateCrowdfundingRequest struct {
-	Title        string  `json:"title" binding:"required"`
-	TargetAmount float64 `json:"target_amount" binding:"required,gt=0"`
-}
-
-// DTO untuk Kontribusi Patungan Internal
-type ContributeCrowdfundingRequest struct {
-	Amount float64 `json:"amount" binding:"required,gt=0"`
-}
-
 // DTO untuk Update Profil User
 type UpdateProfileRequest struct {
-	FullName    string `json:"full_name"`
-	Email       string `json:"email" binding:"omitempty,email"`
-	PhoneNumber string `json:"phone_number"`
-}
-
-// DTO untuk Top-Up Saldo Sandbox
-type TopUpRequest struct {
-	Amount float64 `json:"amount" binding:"required,gt=0"`
+	FullName string `json:"full_name"`
 }
 
 // DTO untuk Rekening Bank User

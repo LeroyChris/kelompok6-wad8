@@ -7,8 +7,8 @@ import (
 // PaymentOrder merepresentasikan order pembayaran di tabel payment_orders
 type PaymentOrder struct {
 	PaymentOrderID   string     `json:"payment_order_id"`
-	OrderType        string     `json:"order_type"`     // CYCLE_CONTRIBUTION, CAMPAIGN_CONTRIBUTION, LOAN_REPAYMENT
-	PaymentMethod    string     `json:"payment_method"` // GATEWAY, MANUAL_TRANSFER, E_WALLET
+	OrderType        string     `json:"order_type"`     // CYCLE_CONTRIBUTION
+	PaymentMethod    string     `json:"payment_method"` // WALLET, MANUAL_TRANSFER
 	Provider         *string    `json:"provider,omitempty"`
 	ProviderOrderRef *string    `json:"provider_order_ref,omitempty"`
 	IdempotencyKey   *string    `json:"idempotency_key,omitempty"`
@@ -36,20 +36,6 @@ type PaymentProof struct {
 	ReviewNote       *string    `json:"review_note,omitempty"`
 	SubmittedAt      time.Time  `json:"submitted_at"`
 	ReviewedAt       *time.Time `json:"reviewed_at,omitempty"`
-}
-
-// PaymentEvent merepresentasikan webhook callback log di tabel payment_events
-type PaymentEvent struct {
-	PaymentEventID   string     `json:"payment_event_id"`
-	PaymentOrderID   *string    `json:"payment_order_id,omitempty"`
-	Provider         string     `json:"provider"`
-	ProviderEventID  string     `json:"provider_event_id"`
-	ProviderOrderRef *string    `json:"provider_order_ref,omitempty"`
-	EventType        string     `json:"event_type"`
-	PayloadHash      string     `json:"payload_hash"`
-	ProcessingStatus string     `json:"processing_status"` // RECEIVED, PROCESSED, IGNORED, FAILED
-	ReceivedAt       time.Time  `json:"received_at"`
-	ProcessedAt      *time.Time `json:"processed_at,omitempty"`
 }
 
 // Disbursement merepresentasikan pencairan dana arisan ke pemenang di tabel disbursements

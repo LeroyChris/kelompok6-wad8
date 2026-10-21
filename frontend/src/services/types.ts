@@ -1,4 +1,3 @@
-export interface ApiEnvelope<T> { status: string; message: string; data: T }
 export interface Circle { circle_id: string; circle_name: string; track_type: 'SPSB' | 'RANDOM_DRAW'; contribution_amount: number; member_limit: number; active_member_count: number; circle_status: string; membership_role: string }
 export interface Cycle { cycle_id: string; circle_id: string; cycle_number: number; cycle_status: string; due_at: string; bidding_open_at?: string; bidding_close_at?: string }
 export interface Obligation { obligation_id: string; participant_id: string; user_id: string; full_name: string; amount_due: number; due_at: string; status: string }

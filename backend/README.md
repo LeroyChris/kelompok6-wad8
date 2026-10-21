@@ -48,38 +48,28 @@ backend/
 │   ├── config/
 │   │   └── database.go              # Koneksi Supabase PostgreSQL (pgxpool)
 │   ├── middleware/
-│   │   ├── auth.go                  # JWT Auth Middleware (Track 1)
-│   │   └── cors.go                  # CORS policy
-│   ├── models/                      # Struct Go representasi 32 tabel DB
+│   │   └── auth.go                  # JWT Auth Middleware & RBAC helpers
+│   ├── models/                      # Struct Go representasi tabel DB core
 │   │   ├── user.go                  # (Track 1)
 │   │   ├── circle.go                # (Track 2)
 │   │   ├── arisan.go                # (Track 3)
 │   │   ├── payment.go               # (Track 3)
-│   │   ├── crowdfunding.go          # (Extended)
-│   │   └── compliance.go            # (Extended)
-│   ├── repository/                  # Raw SQL (pgxpool)
-│   │   ├── user_repository.go       # (Track 1)
-│   │   ├── circle_repository.go     # (Track 2)
-│   │   └── arisan_repository.go     # (Track 3)
-│   ├── service/                     # Business logic
-│   │   ├── auth_service.go          # (Track 1)
-│   │   ├── circle_service.go        # (Track 2)
-│   │   └── arisan_service.go        # (Track 3)
-│   ├── handlers/                    # HTTP Controller
-│   │   ├── auth.go, user.go, bank_account.go # (Track 1)
-│   │   ├── circle.go, group.go               # (Track 2)
-│   │   └── draw.go, payment.go               # (Track 3)
+│   │   └── wallet.go                # Wallet ledger
+│   ├── handlers/                    # HTTP Controller (query SQL langsung via pgxpool)
+│   │   ├── auth.go, user.go, bank_account.go, wallet.go # (Track 1)
+│   │   ├── circle.go                          # (Track 2)
+│   │   └── draw.go, payment.go                # (Track 3)
 │   └── dto/
 │       ├── request.go               # Payload request
 │       └── response.go              # APIResponse standar
 ├── migrations/
-│   ├── 001_schema_v2.sql            # Baseline DDL
-│   ├── 002_core_hardening.sql       # Invariant & index core
-│   └── 003_seed_demo_data.sql       # Seed local/demo
+│   ├── 000_reset_public_schema.sql    # Reset destruktif (dev/demo saja)
+│   ├── 001_schema_v2.sql              # Baseline DDL + hardening + audit
+│   └── 002_seed_demo_data.sql         # Seed local/demo
 └── docs/
+    ├── API_DEMO.md              # Panduan flow API end-to-end
     └── sql/
-        ├── 002_core_queries.sql     # Referensi Raw SQL Core siap pakai
-        └── 004_extended_queries.sql # Referensi Raw SQL Extended
+        └── 002_core_queries.sql     # Referensi Raw SQL Core siap pakai
 ```
 
 ---

@@ -18,17 +18,6 @@ func BuildResponse(code int, status string, message string, data interface{}) ma
 	}
 }
 
-// BuildPaginatedResponse membuat format response JSON dengan pagination
-func BuildPaginatedResponse(code int, status string, message string, data interface{}, meta MetaPagination) map[string]interface{} {
-	return map[string]interface{}{
-		"code":    code,
-		"status":  status,
-		"message": message,
-		"data":    data,
-		"meta":    meta,
-	}
-}
-
 // -----------------------------------------------------------------
 // DTO Response Models (Modul User, Wallet & Bank Accounts)
 // -----------------------------------------------------------------
@@ -37,7 +26,6 @@ type UserProfileResponse struct {
 	ID             string  `json:"id"`
 	FullName       string  `json:"full_name"`
 	Email          string  `json:"email"`
-	PhoneNumber    string  `json:"phone_number"`
 	AvatarURL      string  `json:"avatar_url"`
 	TotalWins      int     `json:"total_wins"`
 	TotalWinAmount float64 `json:"total_win_amount"`
@@ -95,30 +83,6 @@ type BankAccountItem struct {
 // -----------------------------------------------------------------
 // DTO Response Models (Modul Circle, Draw & Bids)
 // -----------------------------------------------------------------
-
-type ParticipantResponse struct {
-	ParticipantID string `json:"participant_id"`
-	UserID        string `json:"user_id"`
-	Name          string `json:"name"`
-	Initials      string `json:"initials"`
-	Status        string `json:"status"`
-}
-
-type DrawResultResponse struct {
-	AwardID              string              `json:"award_id"`
-	CycleID              string              `json:"cycle_id"`
-	Winner               ParticipantResponse `json:"winner"`
-	WinnerName           string              `json:"winner_name"`
-	AwardMethod          string              `json:"award_method"`
-	GrossAmount          float64             `json:"gross_amount"`
-	RandomSeedCommitment string              `json:"random_seed_commitment"`
-}
-
-type BidResponse struct {
-	CycleID        string  `json:"cycle_id"`
-	BidRatePercent float64 `json:"bid_rate_percent"`
-	BidStatus      string  `json:"bid_status"`
-}
 
 type CircleMemberItem struct {
 	UserID           string `json:"user_id"`

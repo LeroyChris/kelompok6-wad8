@@ -11,11 +11,6 @@ export const circleService = {
     return await apiClient.get(`/circles/${circleId}`);
   },
 
-  // Daftar anggota circle
-  getCircleMembers: async (circleId: string) => {
-    return await apiClient.get(`/circles/${circleId}/members`);
-  },
-
   // Matriks pembayaran circle
   getPaymentMatrix: async (circleId: string) => {
     return await apiClient.get(`/circles/${circleId}/payment-matrix`);
@@ -40,9 +35,4 @@ export const circleService = {
 
   lockCircle: (circleId: string) => apiClient.post(`/circles/${circleId}/lock`),
   createCycle: (circleId: string, cycleNumber: number, dueAt: string) => apiClient.post(`/circles/${circleId}/cycles`, { cycle_number: cycleNumber, due_at: dueAt }),
-
-  // Keluar dari Circle (Fitur Baru)
-  leaveCircle: async (circleId: string) => {
-    return await apiClient.post(`/circles/${circleId}/leave`);
-  },
 };

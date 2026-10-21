@@ -7,11 +7,9 @@ export const cycleService = {
   payWallet: (obligationId: string, key: string) => API.post(`/obligations/${obligationId}/payments/wallet`, {}, { headers: { 'Idempotency-Key': key } }),
   createManualPayment: (obligationId: string) => API.post(`/obligations/${obligationId}/payments/manual`),
   uploadProof: (paymentOrderId: string, proofUrl: string) => API.post(`/payments/${paymentOrderId}/proof`, { proof_url: proofUrl }),
-  getMyBid: (cycleId: string) => API.get(`/cycles/${cycleId}/bids/me`),
   submitBid: (cycleId: string, bidRatePercent: number) => API.post(`/cycles/${cycleId}/bids`, { bid_rate_percent: bidRatePercent }),
   closeBidding: (cycleId: string) => API.post(`/cycles/${cycleId}/bidding/close`),
   resolveAward: (cycleId: string) => API.post(`/cycles/${cycleId}/award/resolve`),
   getAward: (cycleId: string) => API.get(`/cycles/${cycleId}/award`),
   getDrawProof: (cycleId: string) => API.get(`/cycles/${cycleId}/draw-proof`),
-  getParticipants: (cycleId: string) => API.get(`/cycles/${cycleId}/participants`, { params: { page: 1, page_size: 100 } }),
 };

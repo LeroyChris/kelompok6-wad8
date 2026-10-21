@@ -16,7 +16,7 @@ type WalletTransaction struct {
 	WalletTxID  string    `json:"wallet_tx_id"`
 	WalletID    string    `json:"wallet_id"`
 	Amount      float64   `json:"amount"`
-	TxType      string    `json:"tx_type"` // INITIAL_BALANCE, TOPUP, DUES_PAYMENT, DISBURSEMENT, WITHDRAWAL
+	TxType      string    `json:"tx_type"` // INITIAL_BALANCE, TOPUP, DUES_PAYMENT, DISBURSEMENT
 	ReferenceID *string   `json:"reference_id,omitempty"`
 	Description *string   `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`

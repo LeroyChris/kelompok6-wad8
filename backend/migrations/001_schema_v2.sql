@@ -1,12 +1,12 @@
 -- ============================================================================
--- ArisanKita Database Schema v2 (Consolidated & Streamlined)
+-- ArisanKita Database Schema v2 (Consolidated Baseline)
 -- Termasuk modul:
---   1. Users & Identitas Auth
+--   1. Users & Identitas Auth (Email OTP)
 --   2. In-App Wallet & Transaksi Ledger
 --   3. Circles, Memberships & Invitations
 --   4. Arisan Cycles, Participants, Obligations, Bids & Awards (SPSB & Draw)
 --   5. Payment Orders, Proofs & Disbursements
---   6. Extended modules (Crowdfunding, Loan, KYC, Risk, Reputation, Relief, Audit)
+--   6. Audit Events
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -27,17 +27,12 @@ $$;
 CREATE TABLE users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     full_name VARCHAR(150) NOT NULL,
-    phone_number VARCHAR(30),
     email VARCHAR(254),
     account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
         CHECK (account_status IN ('ACTIVE', 'SUSPENDED', 'DEACTIVATED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE UNIQUE INDEX uq_users_phone
-    ON users (phone_number)
-    WHERE phone_number IS NOT NULL;
 
 CREATE UNIQUE INDEX uq_users_email
     ON users (LOWER(email))
@@ -51,7 +46,7 @@ CREATE TABLE user_auth_identities (
     identity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     provider VARCHAR(30) NOT NULL
-        CHECK (provider IN ('EMAIL_OTP', 'PHONE_OTP', 'GOOGLE', 'PASSWORD')),
+        CHECK (provider IN ('EMAIL_OTP')),
     provider_subject VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (provider, provider_subject)
@@ -98,7 +93,7 @@ CREATE TABLE wallet_transactions (
     wallet_id UUID NOT NULL REFERENCES user_wallets(wallet_id) ON DELETE CASCADE,
     amount NUMERIC(18, 2) NOT NULL CHECK (amount > 0),
     tx_type VARCHAR(30) NOT NULL
-        CHECK (tx_type IN ('INITIAL_BALANCE', 'TOPUP', 'DUES_PAYMENT', 'DISBURSEMENT', 'WITHDRAWAL')),
+        CHECK (tx_type IN ('INITIAL_BALANCE', 'TOPUP', 'DUES_PAYMENT', 'DISBURSEMENT')),
     reference_id UUID,
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -156,8 +151,6 @@ CREATE TABLE circles (
             partial_disbursement_threshold_percent > 0
             AND partial_disbursement_threshold_percent <= 100
         ),
-    kyc_threshold_amount NUMERIC(18, 2) NOT NULL DEFAULT 5000000
-        CHECK (kyc_threshold_amount > 0),
     starts_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -258,17 +251,6 @@ CREATE TABLE cycle_participants (
 
 CREATE INDEX idx_cycle_participants_cycle ON cycle_participants (cycle_id, participation_status);
 
-CREATE TABLE cycle_participant_substitutions (
-    substitution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    cycle_id UUID NOT NULL REFERENCES arisan_cycles(cycle_id) ON DELETE CASCADE,
-    original_cycle_participant_id UUID NOT NULL REFERENCES cycle_participants(cycle_participant_id) ON DELETE RESTRICT,
-    replacement_cycle_participant_id UUID NOT NULL REFERENCES cycle_participants(cycle_participant_id) ON DELETE RESTRICT,
-    approved_by_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    reason TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (cycle_id, original_cycle_participant_id)
-);
-
 CREATE TABLE cycle_obligations (
     obligation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cycle_participant_id UUID NOT NULL REFERENCES cycle_participants(cycle_participant_id) ON DELETE CASCADE,
@@ -327,12 +309,11 @@ CREATE TABLE draw_results (
 CREATE TABLE payment_orders (
     payment_order_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_type VARCHAR(30) NOT NULL
-        CHECK (order_type IN ('CYCLE_CONTRIBUTION', 'CAMPAIGN_CONTRIBUTION', 'LOAN_REPAYMENT')),
+        CHECK (order_type IN ('CYCLE_CONTRIBUTION')),
     payment_method VARCHAR(25) NOT NULL
-        CHECK (payment_method IN ('WALLET', 'MANUAL_TRANSFER', 'GATEWAY', 'E_WALLET')),
-    provider VARCHAR(50),
-    provider_order_ref VARCHAR(150) UNIQUE,
+        CHECK (payment_method IN ('WALLET', 'MANUAL_TRANSFER')),
     amount NUMERIC(18, 2) NOT NULL CHECK (amount > 0),
+    idempotency_key VARCHAR(100),
     payment_status VARCHAR(25) NOT NULL DEFAULT 'CREATED'
         CHECK (payment_status IN (
             'CREATED', 'PENDING', 'PENDING_REVIEW', 'PAID',
@@ -347,6 +328,10 @@ CREATE TABLE payment_orders (
 CREATE TRIGGER trg_payment_orders_updated_at
 BEFORE UPDATE ON payment_orders
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE UNIQUE INDEX uq_payment_orders_idempotency
+    ON payment_orders (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE obligation_payment_orders (
     payment_order_id UUID PRIMARY KEY REFERENCES payment_orders(payment_order_id) ON DELETE CASCADE,
@@ -366,27 +351,10 @@ CREATE TABLE payment_proofs (
     reviewed_at TIMESTAMPTZ
 );
 
-CREATE TABLE payment_events (
-    payment_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payment_order_id UUID REFERENCES payment_orders(payment_order_id) ON DELETE SET NULL,
-    provider VARCHAR(50) NOT NULL,
-    provider_event_id VARCHAR(200) NOT NULL,
-    provider_order_ref VARCHAR(150),
-    event_type VARCHAR(100) NOT NULL,
-    payload_hash VARCHAR(128) NOT NULL,
-    processing_status VARCHAR(20) NOT NULL DEFAULT 'RECEIVED'
-        CHECK (processing_status IN ('RECEIVED', 'PROCESSED', 'IGNORED', 'FAILED')),
-    received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMPTZ,
-    UNIQUE (provider, provider_event_id)
-);
-
 CREATE TABLE disbursements (
     disbursement_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     award_id UUID NOT NULL REFERENCES cycle_awards(award_id) ON DELETE RESTRICT,
-    bank_account_id UUID REFERENCES user_bank_accounts(bank_account_id) ON DELETE SET NULL,
     provider VARCHAR(50) DEFAULT 'IN_APP_WALLET',
-    provider_disbursement_ref VARCHAR(150) UNIQUE,
     requested_amount NUMERIC(18, 2) NOT NULL CHECK (requested_amount > 0),
     platform_fee_amount NUMERIC(18, 2) NOT NULL DEFAULT 0 CHECK (platform_fee_amount >= 0),
     net_amount NUMERIC(18, 2) NOT NULL CHECK (net_amount > 0),
@@ -394,169 +362,13 @@ CREATE TABLE disbursements (
         CHECK (disbursement_status IN ('REQUESTED', 'PROCESSING', 'PAID', 'FAILED', 'REVERSED')),
     requested_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    CHECK (net_amount = requested_amount - platform_fee_amount)
+    CHECK (net_amount = requested_amount - platform_fee_amount),
+    UNIQUE (award_id)
 );
 
 -- ----------------------------------------------------------------------------
--- 6. EXTENDED BUSINESS & AUDIT TABLES
+-- 6. AUDIT EVENTS
 -- ----------------------------------------------------------------------------
-CREATE TABLE crowdfunding_campaigns (
-    campaign_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    circle_id UUID NOT NULL REFERENCES circles(circle_id) ON DELETE RESTRICT,
-    creator_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    related_award_id UUID REFERENCES cycle_awards(award_id) ON DELETE RESTRICT,
-    campaign_type VARCHAR(25) NOT NULL CHECK (campaign_type IN ('INTERNAL_LOAN', 'DONATION', 'SPONSORSHIP')),
-    title VARCHAR(150) NOT NULL,
-    description TEXT,
-    target_amount NUMERIC(18, 2) NOT NULL CHECK (target_amount > 0),
-    campaign_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
-        CHECK (campaign_status IN ('DRAFT', 'OPEN', 'TARGET_REACHED', 'CLOSED', 'CANCELLED', 'COMPLETED')),
-    starts_at TIMESTAMPTZ,
-    ends_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE campaign_contributions (
-    contribution_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    campaign_id UUID NOT NULL REFERENCES crowdfunding_campaigns(campaign_id) ON DELETE RESTRICT,
-    contributor_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    amount NUMERIC(18, 2) NOT NULL CHECK (amount > 0),
-    contribution_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (contribution_status IN ('PENDING', 'PAID', 'FAILED', 'REFUNDED', 'CANCELLED')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    paid_at TIMESTAMPTZ
-);
-
-CREATE TABLE loan_agreements (
-    loan_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    campaign_id UUID NOT NULL UNIQUE REFERENCES crowdfunding_campaigns(campaign_id) ON DELETE RESTRICT,
-    borrower_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    principal_amount NUMERIC(18, 2) NOT NULL CHECK (principal_amount > 0),
-    service_fee_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
-    loan_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (loan_status IN ('PENDING', 'ACTIVE', 'PAID', 'OVERDUE', 'DEFAULTED', 'CANCELLED')),
-    approved_at TIMESTAMPTZ,
-    maturity_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE loan_repayment_schedules (
-    schedule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    loan_id UUID NOT NULL REFERENCES loan_agreements(loan_id) ON DELETE CASCADE,
-    installment_number INTEGER NOT NULL CHECK (installment_number > 0),
-    due_at TIMESTAMPTZ NOT NULL,
-    amount_due NUMERIC(18, 2) NOT NULL CHECK (amount_due > 0),
-    schedule_status VARCHAR(20) NOT NULL DEFAULT 'UNPAID'
-        CHECK (schedule_status IN ('UNPAID', 'PARTIAL', 'PAID', 'OVERDUE', 'WAIVED', 'CANCELLED')),
-    UNIQUE (loan_id, installment_number)
-);
-
-CREATE TABLE loan_repayments (
-    repayment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    schedule_id UUID NOT NULL REFERENCES loan_repayment_schedules(schedule_id) ON DELETE RESTRICT,
-    amount_paid NUMERIC(18, 2) NOT NULL CHECK (amount_paid > 0),
-    repayment_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (repayment_status IN ('PENDING', 'PAID', 'FAILED', 'REFUNDED')),
-    paid_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE kyc_verifications (
-    verification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    verification_level VARCHAR(20) NOT NULL CHECK (verification_level IN ('BASIC', 'ADVANCED')),
-    verification_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (verification_status IN ('PENDING', 'IN_REVIEW', 'VERIFIED', 'REJECTED', 'EXPIRED')),
-    provider VARCHAR(80),
-    provider_reference VARCHAR(200),
-    document_storage_ref TEXT,
-    name_match_status VARCHAR(20),
-    rejection_reason TEXT,
-    submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    verified_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ
-);
-
-CREATE TABLE circle_kyc_reviews (
-    circle_kyc_review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    circle_id UUID NOT NULL REFERENCES circles(circle_id) ON DELETE CASCADE,
-    required_level VARCHAR(20) NOT NULL CHECK (required_level IN ('BASIC', 'ADVANCED')),
-    triggered_amount NUMERIC(18, 2) NOT NULL CHECK (triggered_amount > 0),
-    review_status VARCHAR(20) NOT NULL DEFAULT 'REQUIRED'
-        CHECK (review_status IN ('REQUIRED', 'IN_PROGRESS', 'COMPLETED', 'WAIVED')),
-    triggered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMPTZ,
-    UNIQUE (circle_id, required_level)
-);
-
-CREATE TABLE risk_block_entries (
-    risk_block_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    block_type VARCHAR(25) NOT NULL CHECK (block_type IN ('USER', 'PHONE', 'BANK_ACCOUNT')),
-    value_hash VARCHAR(128) NOT NULL,
-    reason TEXT NOT NULL,
-    block_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
-        CHECK (block_status IN ('ACTIVE', 'REVOKED', 'EXPIRED')),
-    created_by_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMPTZ,
-    UNIQUE (block_type, value_hash)
-);
-
-CREATE TABLE reputation_events (
-    reputation_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    score_delta INTEGER NOT NULL CHECK (score_delta BETWEEN -100 AND 100),
-    event_type VARCHAR(50) NOT NULL,
-    reason TEXT NOT NULL,
-    reference_type VARCHAR(50),
-    reference_id UUID,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE OR REPLACE VIEW v_user_reputation AS
-SELECT
-    u.user_id,
-    u.full_name,
-    100 + COALESCE(SUM(re.score_delta), 0)::INTEGER AS reputation_score
-FROM users u
-LEFT JOIN reputation_events re ON re.user_id = u.user_id
-GROUP BY u.user_id, u.full_name;
-
-CREATE TABLE obligation_relief_requests (
-    relief_request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    obligation_id UUID NOT NULL REFERENCES cycle_obligations(obligation_id) ON DELETE CASCADE,
-    requested_by_user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE RESTRICT,
-    relief_type VARCHAR(25) NOT NULL CHECK (relief_type IN ('REDUCE_AMOUNT', 'EXTEND_DUE_DATE', 'WAIVE')),
-    requested_amount_due NUMERIC(18, 2),
-    requested_due_at TIMESTAMPTZ,
-    reason TEXT NOT NULL,
-    request_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (request_status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')),
-    reviewed_by_user_id UUID REFERENCES users(user_id) ON DELETE RESTRICT,
-    review_note TEXT,
-    reviewed_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE notification_outbox (
-    notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-    circle_id UUID REFERENCES circles(circle_id) ON DELETE CASCADE,
-    channel VARCHAR(20) NOT NULL CHECK (channel IN ('WHATSAPP', 'EMAIL', 'IN_APP')),
-    template_key VARCHAR(100) NOT NULL,
-    payload JSONB NOT NULL DEFAULT '{}'::JSONB,
-    notification_status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
-        CHECK (notification_status IN ('PENDING', 'PROCESSING', 'SENT', 'FAILED', 'CANCELLED')),
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    scheduled_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sent_at TIMESTAMPTZ,
-    provider_message_ref VARCHAR(200),
-    last_error TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE audit_events (
     audit_event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
@@ -570,3 +382,171 @@ CREATE TABLE audit_events (
 );
 
 CREATE INDEX idx_audit_events_entity ON audit_events (entity_type, entity_id, created_at);
+
+CREATE OR REPLACE FUNCTION audit_event_hash(p_event_type TEXT, p_entity_id UUID, p_payload JSONB)
+RETURNS TEXT
+LANGUAGE sql
+AS $$
+    SELECT encode(digest(p_event_type || ':' || p_entity_id::text || ':' || p_payload::text || ':' || clock_timestamp()::text || ':' || random()::text, 'sha256'), 'hex');
+$$;
+
+-- Application transactions set app.actor_user_id before mutating audited rows.
+CREATE OR REPLACE FUNCTION audit_actor_user_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT NULLIF(current_setting('app.actor_user_id', true), '')::UUID;
+$$;
+
+CREATE OR REPLACE FUNCTION trg_audit_circle_lock()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE payload JSONB; payload_hash TEXT; event_hash TEXT;
+BEGIN
+    IF NEW.circle_status = 'LOCKED' AND OLD.circle_status IS DISTINCT FROM 'LOCKED' THEN
+        payload := jsonb_build_object('previous_status', OLD.circle_status, 'circle_status', NEW.circle_status);
+        payload_hash := encode(digest(payload::text, 'sha256'), 'hex');
+        event_hash := audit_event_hash('CIRCLE_LOCKED', NEW.circle_id, payload);
+        INSERT INTO audit_events (actor_user_id, event_type, entity_type, entity_id, payload_hash, event_hash)
+        VALUES (audit_actor_user_id(), 'CIRCLE_LOCKED', 'CIRCLE', NEW.circle_id, payload_hash, event_hash);
+    END IF;
+    RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION trg_audit_payment_proof_review()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE payload JSONB; payload_hash TEXT; event_hash TEXT;
+BEGIN
+    IF NEW.reviewed_at IS NOT NULL AND OLD.reviewed_at IS NULL THEN
+        payload := jsonb_build_object('review_status', NEW.review_status, 'payment_order_id', NEW.payment_order_id);
+        payload_hash := encode(digest(payload::text, 'sha256'), 'hex');
+        event_hash := audit_event_hash('PAYMENT_PROOF_REVIEWED', NEW.payment_proof_id, payload);
+        INSERT INTO audit_events (actor_user_id, event_type, entity_type, entity_id, payload_hash, event_hash)
+        VALUES (NEW.reviewed_by_user_id, 'PAYMENT_PROOF_REVIEWED', 'PAYMENT_PROOF', NEW.payment_proof_id, payload_hash, event_hash);
+    END IF;
+    RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION trg_audit_cycle_award()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE payload JSONB; payload_hash TEXT; event_hash TEXT;
+BEGIN
+    payload := jsonb_build_object('cycle_id', NEW.cycle_id, 'award_method', NEW.award_method, 'gross_amount', NEW.gross_amount, 'net_award_amount', NEW.net_award_amount);
+    payload_hash := encode(digest(payload::text, 'sha256'), 'hex');
+    event_hash := audit_event_hash('CYCLE_AWARD_RESOLVED', NEW.award_id, payload);
+    INSERT INTO audit_events (actor_user_id, event_type, entity_type, entity_id, payload_hash, event_hash)
+    VALUES (audit_actor_user_id(), 'CYCLE_AWARD_RESOLVED', 'CYCLE_AWARD', NEW.award_id, payload_hash, event_hash);
+    RETURN NEW;
+END; $$;
+
+CREATE OR REPLACE FUNCTION trg_audit_disbursement()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE payload JSONB; payload_hash TEXT; event_hash TEXT;
+BEGIN
+    IF NEW.disbursement_status = 'PAID' THEN
+        payload := jsonb_build_object('award_id', NEW.award_id, 'net_amount', NEW.net_amount, 'provider', NEW.provider);
+        payload_hash := encode(digest(payload::text, 'sha256'), 'hex');
+        event_hash := audit_event_hash('DISBURSEMENT_PAID', NEW.disbursement_id, payload);
+        INSERT INTO audit_events (actor_user_id, event_type, entity_type, entity_id, payload_hash, event_hash)
+        VALUES (audit_actor_user_id(), 'DISBURSEMENT_PAID', 'DISBURSEMENT', NEW.disbursement_id, payload_hash, event_hash);
+    END IF;
+    RETURN NEW;
+END; $$;
+
+CREATE TRIGGER trg_audit_circle_lock AFTER UPDATE OF circle_status ON circles FOR EACH ROW EXECUTE FUNCTION trg_audit_circle_lock();
+CREATE TRIGGER trg_audit_payment_proof_review AFTER UPDATE ON payment_proofs FOR EACH ROW EXECUTE FUNCTION trg_audit_payment_proof_review();
+CREATE TRIGGER trg_audit_cycle_award AFTER INSERT ON cycle_awards FOR EACH ROW EXECUTE FUNCTION trg_audit_cycle_award();
+CREATE TRIGGER trg_audit_disbursement AFTER INSERT OR UPDATE OF disbursement_status ON disbursements FOR EACH ROW EXECUTE FUNCTION trg_audit_disbursement();
+
+-- ----------------------------------------------------------------------------
+-- 7. DRAW PROVENANCE & FINANCIAL INVARIANTS (core hardening)
+-- ----------------------------------------------------------------------------
+
+-- Preserve enough data to verify a completed random draw after the seed is
+-- revealed, including the deterministic participant snapshot it was based on.
+ALTER TABLE draw_results
+    ADD COLUMN random_seed_reveal TEXT,
+    ADD COLUMN participant_snapshot_hash VARCHAR(128),
+    ADD COLUMN algorithm_version VARCHAR(50) NOT NULL DEFAULT 'SHA256_MOD_V1';
+
+-- gross_amount is the paid cycle pot. A SPSB award retains both the penalty
+-- and the amount actually credited to the winner.
+ALTER TABLE cycle_awards
+    ADD COLUMN penalty_amount NUMERIC(18, 2) NOT NULL DEFAULT 0
+        CHECK (penalty_amount >= 0),
+    ADD COLUMN net_award_amount NUMERIC(18, 2);
+
+UPDATE cycle_awards
+SET net_award_amount = gross_amount - penalty_amount
+WHERE net_award_amount IS NULL;
+
+ALTER TABLE cycle_awards
+    ALTER COLUMN net_award_amount SET NOT NULL;
+
+ALTER TABLE cycle_awards
+    ADD CONSTRAINT chk_cycle_awards_net_amount
+    CHECK (net_award_amount > 0 AND net_award_amount = gross_amount - penalty_amount);
+
+-- Cursor pagination indexes.
+CREATE INDEX idx_wallet_transactions_wallet_cursor
+    ON wallet_transactions (wallet_id, created_at DESC, wallet_tx_id DESC);
+
+CREATE INDEX idx_arisan_cycles_circle_cursor
+    ON arisan_cycles (circle_id, created_at DESC, cycle_id DESC);
+
+CREATE INDEX idx_circle_memberships_circle_cursor
+    ON circle_memberships (circle_id, membership_status, joined_at ASC, circle_membership_id ASC);
+
+CREATE INDEX idx_cycle_obligations_status_cursor
+    ON cycle_obligations (obligation_status, created_at DESC, obligation_id DESC);
+
+CREATE INDEX idx_payment_orders_status_cursor
+    ON payment_orders (payment_status, created_at DESC, payment_order_id DESC);
+
+-- Foreign keys alone cannot ensure that snapshots and awards belong to the
+-- same cycle/circle. Keep those financial invariants in the database too.
+CREATE OR REPLACE FUNCTION enforce_cycle_participant_membership_circle()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM arisan_cycles ac
+        JOIN circle_memberships cm ON cm.circle_id = ac.circle_id
+        WHERE ac.cycle_id = NEW.cycle_id
+          AND cm.circle_membership_id = NEW.circle_membership_id
+    ) THEN
+        RAISE EXCEPTION 'cycle participant membership must belong to the cycle circle';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_cycle_participant_membership_circle
+BEFORE INSERT OR UPDATE OF cycle_id, circle_membership_id ON cycle_participants
+FOR EACH ROW EXECUTE FUNCTION enforce_cycle_participant_membership_circle();
+
+CREATE OR REPLACE FUNCTION enforce_cycle_award_participant()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM cycle_participants cp
+        WHERE cp.cycle_participant_id = NEW.cycle_participant_id
+          AND cp.cycle_id = NEW.cycle_id
+          AND cp.participation_status = 'ELIGIBLE'
+    ) THEN
+        RAISE EXCEPTION 'award participant must be eligible in the award cycle';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_cycle_award_participant
+BEFORE INSERT OR UPDATE OF cycle_id, cycle_participant_id ON cycle_awards
+FOR EACH ROW EXECUTE FUNCTION enforce_cycle_award_participant();
