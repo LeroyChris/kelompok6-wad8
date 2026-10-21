@@ -1,27 +1,18 @@
 import React, { useState, useMemo, useEffect, memo, useCallback } from 'react';
 import {
   ChevronRight,
-  Lock,
   CheckCircle2,
-  TrendingUp,
-  Clock,
-  Zap,
-  X,
-  Gavel,
-  Disc,
   ArrowLeft,
   AlertTriangle,
-  Info,
   ShieldCheck,
-  Ban,
 } from 'lucide-react';
 
 import { circleAuctionService } from '../services/circleAuctionService';
 
 /* ─── Constants ─── */
 const POT = 15_000_000;
-const FLOOR = 150_000;   // 1% of pot
-const CEILING = 3_750_000; // 25% of pot
+const FLOOR = 150_000;     // 1% dari pot
+const CEILING = 3_750_000; // 25% dari pot
 const DEFAULT_BID = 375_000; // 2.5%
 
 /* ─── Helpers ─── */
@@ -33,21 +24,6 @@ function fmtPct(n: number) {
 }
 function toSliderPct(bid: number) {
   return Math.round(((bid - FLOOR) / (CEILING - FLOOR)) * 100);
-}
-
-/* ─── Countdown Hook ─── */
-function useCountdown(initial: number) {
-  const [secs, setSecs] = useState(initial);
-  useEffect(() => {
-    const id = setInterval(() => setSecs((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(id);
-  }, []);
-  return {
-    h: String(Math.floor(secs / 3600)).padStart(2, '0'),
-    m: String(Math.floor((secs % 3600) / 60)).padStart(2, '0'),
-    s: String(secs % 60).padStart(2, '0'),
-    total: secs,
-  };
 }
 
 /* ─── Isolated Bid Form ─── */
@@ -199,18 +175,19 @@ const BidForm = memo(function BidForm({
 
 export interface AuctionRoomProps {
   onBack:     () => void;
+  cycleId:    string;
   trackType?: 'A' | 'B';
   embedded?:  boolean;
 }
 
 export default function AuctionRoom({
-  onBack    = () => {},
+  onBack,
+  cycleId,
   trackType = 'A',
 }: AuctionRoomProps) {
   const [confirmBid, setConfirmBid]     = useState<number | null>(null);
   const [submitted, setSubmitted]       = useState(false);
   const [confirmedBid, setConfirmedBid] = useState<number>(DEFAULT_BID);
-  const countdown = useCountdown(9879);
 
   const handleBidSubmit = useCallback((bid: number) => {
     setConfirmBid(bid);
@@ -218,13 +195,23 @@ export default function AuctionRoom({
 
   const handleConfirm = async () => {
     if (confirmBid === null) return;
+
+    if (!cycleId) {
+      alert("ID Siklus Lelang tidak ditemukan. Silakan pilih Circle/Siklus yang valid terlebih dahulu.");
+      return;
+    }
+
     try {
-      await circleAuctionService.submitBid('cyc-uuid-002', confirmBid);
+      const bidRatePercent = Number(((confirmBid / POT) * 100).toFixed(2));
+
+      await circleAuctionService.submitBid(cycleId, bidRatePercent);
       setConfirmedBid(confirmBid);
       setConfirmBid(null);
       setSubmitted(true);
+      alert("Penawaran lelang berhasil dikunci!");
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal mengirim penawaran lelang ke server Go');
+      console.error("Gagal submit bid:", err);
+      alert(err.response?.data?.message || err.message || "Gagal mengirim penawaran lelang.");
     }
   };
 
@@ -237,22 +224,24 @@ export default function AuctionRoom({
             <span className="hidden sm:block">Circles</span>
           </button>
           <ChevronRight className="w-3 h-3 shrink-0" />
-          <span className="font-bold text-[#0A2578] truncate">Room Lelang SPSB (Siklus 4)</span>
+          <span className="font-bold text-[#0A2578] truncate">Room Lelang SPSB (Cycle ID: {cycleId})</span>
         </nav>
       </header>
 
       {trackType === 'A' && (
         <main className="flex-1 overflow-y-auto p-4 md:p-6 xl:p-8 pb-28 lg:pb-10 flex flex-col gap-6">
           <div className="bg-[#0A2578] rounded-2xl p-6 md:p-8 shadow-xl">
-            <h1 className="text-xl md:text-2xl font-black text-white">Lelang SPSB Siklus 4</h1>
+            <h1 className="text-xl md:text-2xl font-black text-white">Lelang SPSB Room</h1>
             <p className="text-3xl font-extrabold text-white font-mono mt-2">Rp 15.000.000</p>
           </div>
 
           <div className="bg-white rounded-2xl border p-6">
             {submitted ? (
               <div className="flex flex-col gap-4">
-                <p className="text-emerald-700 font-bold">Penawaran Terkunci!</p>
-                <button onClick={() => setSubmitted(false)} className="py-2 border rounded-xl">Ubah Penawaran</button>
+                <p className="text-emerald-700 font-bold">Penawaran Terkunci! ({fmtRp(confirmedBid)} / {fmtPct(confirmedBid)})</p>
+                <button onClick={() => setSubmitted(false)} className="py-2 border rounded-xl font-bold text-xs text-[#0A2578]">
+                  Ubah Penawaran
+                </button>
               </div>
             ) : (
               <BidForm onSubmit={handleBidSubmit} />
@@ -265,10 +254,14 @@ export default function AuctionRoom({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-4">
           <div className="bg-white max-w-md w-full p-6 rounded-2xl flex flex-col gap-4">
             <h3 className="font-black text-[#0A2578] text-lg">Konfirmasi Penawaran</h3>
-            <p className="text-sm font-mono text-[#F84A4D] font-bold">{fmtRp(confirmBid)}</p>
+            <p className="text-sm font-mono text-[#F84A4D] font-bold">{fmtRp(confirmBid)} ({fmtPct(confirmBid)})</p>
             <div className="flex gap-3 mt-2">
-              <button onClick={() => setConfirmBid(null)} className="flex-1 py-3 border rounded-xl">Batal</button>
-              <button onClick={handleConfirm} className="flex-1 py-3 bg-[#F84A4D] text-white font-bold rounded-xl">Kunci Bid</button>
+              <button onClick={() => setConfirmBid(null)} className="flex-1 py-3 border rounded-xl font-bold text-slate-600 text-xs">
+                Batal
+              </button>
+              <button onClick={handleConfirm} className="flex-1 py-3 bg-[#F84A4D] text-white font-bold rounded-xl text-xs hover:bg-[#e03a3d]">
+                Kunci Bid
+              </button>
             </div>
           </div>
         </div>

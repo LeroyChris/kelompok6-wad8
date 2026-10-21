@@ -35,6 +35,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [circles, setCircles] = useState<any[]>([]);
   const [activeCircle, setActiveCircle] = useState<any>(null);
+  const [activeCycleId, setActiveCycleId] = useState<string>('');
   const [userProfile, setUserProfile] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -91,12 +92,57 @@ export default function App() {
     initAppData();
   }, []);
 
+  // Sync Cycle ID murni dari Database PostgreSQL
+  useEffect(() => {
+    const fetchRealCycleFromDB = async () => {
+      if (!activeCircle) return;
+      
+      const realCircleId = activeCircle.circle_id || activeCircle.id;
+      
+      if (activeCircle.current_cycle_id) {
+        setActiveCycleId(activeCircle.current_cycle_id);
+        return;
+      }
+
+      try {
+        const res = await circleService.getCircleCycles(realCircleId);
+        const cycleList = res?.data?.data || res?.data || [];
+        
+        if (Array.isArray(cycleList) && cycleList.length > 0) {
+          const latestCycle = cycleList[cycleList.length - 1];
+          setActiveCycleId(latestCycle.cycle_id || latestCycle.id);
+        } else {
+          // Jika belum ada siklus di DB, buat Siklus 1 secara otomatis di PostgreSQL
+          const createRes = await circleService.createCycle(realCircleId, {
+            cycle_number: 1,
+            due_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          });
+          
+          const newCycleId = createRes?.data?.data?.cycle_id || createRes?.data?.cycle_id;
+          if (newCycleId) {
+            setActiveCycleId(newCycleId);
+          } else {
+            // Fallback ke ID circle jika endpoint mengembalikan circle-level ID
+            setActiveCycleId(realCircleId);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal mengambil/membuat siklus riil dari DB:", err);
+        // Fallback langsung menggunakan ID circle agar URL endpoint lelang tetap terpanggil
+        setActiveCycleId(realCircleId);
+      }
+    };
+
+    fetchRealCycleFromDB();
+  }, [activeCircle]);
+
   const handleLogout = () => {
     localStorage.removeItem('auth_token');
     setIsAuthenticated(false);
     setUserProfile(null);
     setCircles([]);
     setActiveCircle(null);
+    setActiveCycleId('');
   };
 
   const handleLeaveCircle = async () => {
@@ -121,17 +167,12 @@ export default function App() {
     );
   }
 
-  // =========================================================================
-  // SCREEN STATE 1: UNAUTHENTICATED (TERPISAH TOTAL DARI DASHBOARD)
-  // =========================================================================
   if (!isAuthenticated) {
     return (
       <div className="w-full min-h-screen bg-[#0A2578] flex flex-col justify-between p-6 sm:p-12 text-white relative overflow-hidden">
-        {/* Decorative Background Elements */}
         <div className="absolute top-0 right-0 w-96 h-96 bg-[#5A83DB]/20 rounded-full blur-3xl -z-0 pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-96 h-96 bg-[#F84A4D]/10 rounded-full blur-3xl -z-0 pointer-events-none" />
 
-        {/* Top Navbar Header */}
         <header className="flex items-center justify-between w-full max-w-6xl mx-auto z-10">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center border border-white/20">
@@ -147,7 +188,6 @@ export default function App() {
           </button>
         </header>
 
-        {/* Hero Section Banner */}
         <main className="max-w-3xl mx-auto text-center flex flex-col items-center gap-6 my-auto z-10 py-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full border border-white/15 text-xs font-semibold text-emerald-300 backdrop-blur-md">
             <Sparkles className="w-4 h-4 text-emerald-400" /> Platform Arisan Digital Terverifikasi
@@ -169,12 +209,10 @@ export default function App() {
           </div>
         </main>
 
-        {/* Footer info */}
         <footer className="text-center text-xs text-white/40 z-10">
           &copy; {new Date().getFullYear()} ArisanKita Platform. Hak Cipta Dilindungi.
         </footer>
 
-        {/* Modal Auth */}
         <LoginModal
           isOpen={isLoginModalOpen}
           onClose={() => setIsLoginModalOpen(false)}
@@ -187,13 +225,9 @@ export default function App() {
     );
   }
 
-  // =========================================================================
-  // SCREEN STATE 2: AUTHENTICATED TAPI BELUM PUNYA CIRCLE (ONBOARDING SCREEN)
-  // =========================================================================
   if (circles.length === 0) {
     return (
       <div className="w-full min-h-screen bg-[#FFF6ED] flex flex-col">
-        {/* Simple Authenticated Header */}
         <header className="bg-[#0A2578] text-white px-8 py-4 flex items-center justify-between border-b border-white/10 shadow-md">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-[#5A83DB]" />
@@ -212,7 +246,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Onboarding Cards */}
         <main className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-2xl mx-auto my-auto">
           <div className="bg-white p-8 sm:p-10 rounded-3xl border border-slate-200/80 shadow-2xl flex flex-col items-center gap-6 w-full">
             <div className="w-16 h-16 bg-[#0A2578]/10 rounded-2xl flex items-center justify-center text-[#0A2578] font-bold">
@@ -224,7 +257,7 @@ export default function App() {
                 Selamat Datang, {userProfile?.full_name || 'Pengguna'}!
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-2 leading-relaxed">
-                Akun Anda telah terverifikasi. Saat ini Anda belum terdaftar di kelompok Arisan manapun. Pilih opsi di bawah untuk bergabung atau membuat kelompok baru.
+                Akun Anda telah terverifikasi. Saat ini Anda belum terdaftar di kelompok Arisan manapun.
               </p>
             </div>
 
@@ -256,15 +289,11 @@ export default function App() {
     );
   }
 
-  // =========================================================================
-  // SCREEN STATE 3: AUTHENTICATED & MEMILIKI CIRCLE (DASHBOARD LAYOUT UTAMA)
-  // =========================================================================
-  const activeCircleId = activeCircle?.circle_id || activeCircle?.id || '';
+  const rawCircleId = activeCircle?.circle_id || activeCircle?.id || '';
   const trackType = activeCircle?.track_type || activeCircle?.trackType || 'RANDOM_DRAW';
 
   return (
     <div className="w-full min-h-screen bg-[#FFF6ED] flex flex-col lg:flex-row font-sans">
-      {/* SIDEBAR NAVIGATION */}
       <aside className="w-full lg:w-[280px] bg-[#0A2578] text-white p-5 flex flex-col gap-4 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -280,11 +309,10 @@ export default function App() {
           </button>
         </div>
 
-        {/* SELECTOR CIRCLE */}
         <div className="bg-white/10 rounded-xl p-3 border border-white/15 flex flex-col gap-2">
           <p className="text-[10px] text-white/50 font-bold uppercase">Circle Saya</p>
           <select
-            value={activeCircleId}
+            value={rawCircleId}
             onChange={(e) => {
               const found = circles.find((c) => (c.circle_id || c.id) === e.target.value);
               if (found) {
@@ -322,7 +350,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* MENU NAVIGATION */}
         <nav className="flex flex-col gap-1 flex-1">
           <button
             onClick={() => setScreen('dashboard')}
@@ -381,7 +408,6 @@ export default function App() {
           </button>
         </nav>
 
-        {/* LEAVE CIRCLE BUTTON */}
         <button
           onClick={handleLeaveCircle}
           className="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors"
@@ -389,7 +415,6 @@ export default function App() {
           <LeaveIcon className="w-3.5 h-3.5" /> Keluar dari Circle
         </button>
 
-        {/* USER PROFILE CARD */}
         <div className="bg-white/10 p-3 rounded-xl flex items-center gap-3 border border-white/10">
           <div className="w-8 h-8 rounded-full bg-[#5A83DB] text-white font-black text-xs flex items-center justify-center shrink-0">
             {userProfile?.full_name ? userProfile.full_name.charAt(0) : 'U'}
@@ -401,14 +426,13 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN VIEWPORT */}
       <main className="flex-1 overflow-hidden flex flex-col">
-        {screen === 'dashboard' && <Dashboard circleId={activeCircleId} onNavigate={(s) => setScreen(s)} />}
-        {screen === 'payment_matrix' && <PaymentMatrix circleId={activeCircleId} />}
-        {screen === 'spin_wheel' && <SpinWheel circleId={activeCircleId} trackType="B" />}
-        {screen === 'spsb_auction' && <AuctionRoom circleId={activeCircleId} onBack={() => setScreen('dashboard')} />}
-        {screen === 'crowdfunding' && <Crowdfunding circleId={activeCircleId} />}
-        {screen === 'audit_trail' && <AuditTrail circleId={activeCircleId} />}
+        {screen === 'dashboard' && <Dashboard circleId={rawCircleId} onNavigate={(s) => setScreen(s)} />}
+        {screen === 'payment_matrix' && <PaymentMatrix circleId={rawCircleId} />}
+        {screen === 'spin_wheel' && <SpinWheel circleId={activeCycleId} trackType="B" />}
+        {screen === 'spsb_auction' && <AuctionRoom cycleId={activeCycleId} onBack={() => setScreen('dashboard')} />}
+        {screen === 'crowdfunding' && <Crowdfunding circleId={activeCycleId} />}
+        {screen === 'audit_trail' && <AuditTrail circleId={activeCycleId} />}
       </main>
 
       <CreateCircleModal isOpen={isCreateCircleOpen} onClose={() => setIsCreateCircleOpen(false)} onSuccess={() => initAppData()} />

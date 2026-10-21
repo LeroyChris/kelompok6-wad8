@@ -19,30 +19,13 @@ func NewDrawHandler(drawService service.DrawService) *DrawHandler {
 	return &DrawHandler{drawService: drawService}
 }
 
-type BidInput struct {
-	BidRatePercent float64 `json:"bid_rate_percent" binding:"required"`
-}
-
 type CreateCycleInput struct {
 	CycleNumber int    `json:"cycle_number" binding:"required"`
 	DueAt       string `json:"due_at"`
 }
 
-func normalizeCycleID(id string) string {
-	switch id {
-	case "cyc-uuid-001":
-		return "c1111111-0001-0000-0000-000000000001"
-	case "cyc-uuid-002":
-		return "c1111111-0002-0000-0000-000000000002"
-	case "cyc-uuid-sqd-001", "cyc-spsb-001":
-		return "c2222222-0001-0000-0000-000000000001"
-	default:
-		return id
-	}
-}
-
 func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
+	cycleID := c.Param("id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
@@ -56,7 +39,7 @@ func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 }
 
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
+	cycleID := c.Param("id")
 
 	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID)
 	if err == nil {
@@ -64,7 +47,6 @@ func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 		return
 	}
 
-	// Safe Fallback Sandbox
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pengundian arisan berhasil dieksekusi (Sandbox)", gin.H{
 		"award_id":     "awd-" + cycleID,
 		"cycle_id":     cycleID,
@@ -74,16 +56,18 @@ func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 		"status":       "COMPLETED",
 	}))
 }
+
 func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
-	userID := c.GetString("userID")
+	cycleID := c.Param("id")
+
+	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = c.GetString("user_id")
+		userID = c.GetString("userID")
 	}
 
-	var input BidInput
+	var input dto.SubmitBidRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input bid tidak valid: "+err.Error(), nil))
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Input penawaran lelang tidak valid: "+err.Error(), nil))
 		return
 	}
 
@@ -144,7 +128,7 @@ func (h *DrawHandler) GetCircleCycles(c *gin.Context) {
 }
 
 func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
+	cycleID := c.Param("id")
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Berhasil mengambil detail siklus", gin.H{
 		"cycle_id":     cycleID,
 		"cycle_number": 1,
@@ -153,7 +137,7 @@ func (h *DrawHandler) GetCycleDetail(c *gin.Context) {
 }
 
 func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
+	cycleID := c.Param("id")
 	obligations, err := h.drawService.GetCycleObligations(c.Request.Context(), cycleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil tagihan: "+err.Error(), nil))
@@ -164,7 +148,7 @@ func (h *DrawHandler) GetCycleObligations(c *gin.Context) {
 }
 
 func (h *DrawHandler) GetCycleAward(c *gin.Context) {
-	cycleID := normalizeCycleID(c.Param("id"))
+	cycleID := c.Param("id")
 	award, err := h.drawService.GetCycleAward(c.Request.Context(), cycleID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil data pemenang: "+err.Error(), nil))
