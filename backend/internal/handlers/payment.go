@@ -39,6 +39,12 @@ func (h *PaymentHandler) GetCirclePaymentProofs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "status review tidak valid", nil))
 		return
 	}
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
 	rows, err := h.DB.Query(c.Request.Context(), `
 		SELECT pp.payment_proof_id::text, pp.payment_order_id::text, pp.proof_url,
 			pp.review_status, pp.submitted_at, u.full_name, co.amount_due::float8
@@ -51,13 +57,18 @@ func (h *PaymentHandler) GetCirclePaymentProofs(c *gin.Context) {
 		JOIN users u ON u.user_id=cm.user_id
 		JOIN arisan_cycles ac ON ac.cycle_id=cp.cycle_id
 		WHERE ac.circle_id=$1 AND pp.review_status=$2
-		ORDER BY pp.submitted_at ASC, pp.payment_proof_id ASC`, c.Param("id"), status)
+		  AND ($3::timestamptz IS NULL OR (pp.submitted_at, pp.payment_proof_id) > ($3::timestamptz, $4::uuid))
+		ORDER BY pp.submitted_at ASC, pp.payment_proof_id ASC
+		LIMIT $5`, c.Param("id"), status, cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil bukti pembayaran", nil))
 		return
 	}
 	defer rows.Close()
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	var nextCursor any
+	var lastSubmittedAt time.Time
+	var lastID string
 	for rows.Next() {
 		var proofID, orderID, proofURL, reviewStatus, fullName string
 		var submittedAt time.Time
@@ -66,9 +77,14 @@ func (h *PaymentHandler) GetCirclePaymentProofs(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data bukti pembayaran tidak valid", nil))
 			return
 		}
+		if len(items) == limit {
+			nextCursor = encodeWalletCursor(lastSubmittedAt, lastID)
+			break
+		}
 		items = append(items, gin.H{"payment_proof_id": proofID, "payment_order_id": orderID, "proof_url": proofURL, "review_status": reviewStatus, "submitted_at": submittedAt, "full_name": fullName, "amount": amount})
+		lastSubmittedAt, lastID = submittedAt, proofID
 	}
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar bukti pembayaran berhasil diambil", gin.H{"items": items}))
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar bukti pembayaran berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
 
 // advanceCycleAfterCollection moves a fully paid cycle to its next legal state.
@@ -569,9 +585,15 @@ func (h *PaymentHandler) HandlePaymentGatewayWebhook(c *gin.Context) {
 
 // GET /api/v1/circles/:id/payment-matrix
 func (h *PaymentHandler) GetPaymentMatrix(c *gin.Context) {
+	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
 	rows, err := h.DB.Query(c.Request.Context(), `
 		SELECT co.obligation_id::text, u.full_name, co.amount_due::float8,
-			co.obligation_status, po.payment_method, po.paid_at, ac.cycle_number
+			co.obligation_status, po.payment_method, po.paid_at, ac.cycle_number, co.created_at
 		FROM cycle_obligations co
 		JOIN cycle_participants cp ON cp.cycle_participant_id=co.cycle_participant_id
 		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
@@ -580,24 +602,35 @@ func (h *PaymentHandler) GetPaymentMatrix(c *gin.Context) {
 		LEFT JOIN obligation_payment_orders opo ON opo.obligation_id=co.obligation_id
 		LEFT JOIN payment_orders po ON po.payment_order_id=opo.payment_order_id AND po.payment_status='PAID'
 		WHERE ac.circle_id=$1
-		ORDER BY ac.cycle_number DESC, u.full_name ASC`, c.Param("id"))
+		  AND ($2::timestamptz IS NULL OR (co.created_at, co.obligation_id) < ($2::timestamptz, $3::uuid))
+		ORDER BY co.created_at DESC, co.obligation_id DESC
+		LIMIT $4`, c.Param("id"), cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil matriks pembayaran", nil))
 		return
 	}
 	defer rows.Close()
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	var nextCursor any
+	var lastCreatedAt time.Time
+	var lastID string
 	for rows.Next() {
 		var id, name, status string
 		var amount float64
 		var method *string
 		var paidAt *time.Time
 		var cycleNumber int
-		if err := rows.Scan(&id, &name, &amount, &status, &method, &paidAt, &cycleNumber); err != nil {
+		var createdAt time.Time
+		if err := rows.Scan(&id, &name, &amount, &status, &method, &paidAt, &cycleNumber, &createdAt); err != nil {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data matriks tidak valid", nil))
 			return
 		}
+		if len(items) == limit {
+			nextCursor = encodeWalletCursor(lastCreatedAt, lastID)
+			break
+		}
 		items = append(items, gin.H{"obligation_id": id, "full_name": name, "amount_due": amount, "obligation_status": status, "payment_method": method, "paid_at": paidAt, "cycle_number": cycleNumber})
+		lastCreatedAt, lastID = createdAt, id
 	}
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Matriks pembayaran berhasil diambil", gin.H{"items": items}))
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Matriks pembayaran berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": limit, "next_cursor": nextCursor}}))
 }
