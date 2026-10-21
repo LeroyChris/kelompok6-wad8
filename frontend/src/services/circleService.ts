@@ -36,6 +36,9 @@ export const circleService = {
     return await apiClient.post('/circles/join', { invite_code: inviteCode });
   },
 
+  lockCircle: (circleId: string) => apiClient.post(`/circles/${circleId}/lock`),
+  createCycle: (circleId: string, cycleNumber: number, dueAt: string) => apiClient.post(`/circles/${circleId}/cycles`, { cycle_number: cycleNumber, due_at: dueAt }),
+
   // Keluar dari Circle (Fitur Baru)
   leaveCircle: async (circleId: string) => {
     return await apiClient.post(`/circles/${circleId}/leave`);

@@ -149,24 +149,27 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.FullName) == "" && strings.TrimSpace(req.Email) == "" {
-		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Isi setidaknya full_name atau email", nil))
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "full_name wajib diisi", nil))
 		return
 	}
 	if req.PhoneNumber != "" {
 		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nomor telepon tidak dapat diubah melalui profil", nil))
 		return
 	}
+	if strings.TrimSpace(req.Email) != "" {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Email login tidak dapat diubah melalui profil", nil))
+		return
+	}
 
 	query := `
 		UPDATE users
-		SET full_name = COALESCE(NULLIF($1, ''), full_name),
-			email = COALESCE(NULLIF($2, ''), email)
-		WHERE user_id = $3
+		SET full_name = $1
+		WHERE user_id = $2
 		RETURNING user_id::text, full_name, COALESCE(email, ''), COALESCE(phone_number, ''), created_at`
 
 	var profile dto.UserProfileResponse
 	var createdAt time.Time
-	err := h.DB.QueryRow(c.Request.Context(), query, strings.TrimSpace(req.FullName), strings.TrimSpace(req.Email), userID).Scan(
+	err := h.DB.QueryRow(c.Request.Context(), query, strings.TrimSpace(req.FullName), userID).Scan(
 		&profile.ID, &profile.FullName, &profile.Email, &profile.PhoneNumber, &createdAt,
 	)
 	if err != nil {

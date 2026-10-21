@@ -254,7 +254,41 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	err = tx.QueryRow(ctx, `INSERT INTO payment_orders (order_type,payment_method,amount,payment_status,expires_at) VALUES ('CYCLE_CONTRIBUTION','MANUAL_TRANSFER',$1,'PENDING_REVIEW',CURRENT_TIMESTAMP + INTERVAL '24 hours') RETURNING payment_order_id::text`, obligationAmount).Scan(&paymentOrderID)
+	// Re-lock the owned obligation so concurrent manual requests cannot create
+	// multiple pending orders.
+	err = tx.QueryRow(ctx, `
+		SELECT co.amount_due, co.obligation_status
+		FROM cycle_obligations co
+		JOIN cycle_participants cp ON cp.cycle_participant_id=co.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
+		WHERE co.obligation_id=$1 AND cm.user_id=$2
+		FOR UPDATE OF co`, obligationID, userID).Scan(&obligationAmount, &currentStatus)
+	if err != nil || currentStatus == "PAID" {
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Tagihan tidak tersedia untuk pembayaran manual", nil))
+		return
+	}
+	var existingKey *string
+	err = tx.QueryRow(ctx, `
+		SELECT po.payment_order_id::text, po.idempotency_key
+		FROM payment_orders po
+		JOIN obligation_payment_orders opo ON opo.payment_order_id=po.payment_order_id
+		WHERE opo.obligation_id=$1 AND po.payment_method='MANUAL_TRANSFER'
+		  AND po.payment_status IN ('CREATED','PENDING_REVIEW')
+		ORDER BY po.created_at DESC LIMIT 1`, obligationID).Scan(&paymentOrderID, &existingKey)
+	if err == nil {
+		if idempotencyKey != "" && existingKey != nil && *existingKey == idempotencyKey {
+			_ = tx.Commit(ctx)
+			c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Permintaan pembayaran telah diproses sebelumnya", gin.H{"payment_order_id": paymentOrderID, "obligation_id": obligationID, "payment_status": "PENDING_REVIEW", "idempotent_replay": true}))
+			return
+		}
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Sudah ada pembayaran manual yang menunggu bukti atau review", nil))
+		return
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memeriksa pembayaran manual", nil))
+		return
+	}
+	err = tx.QueryRow(ctx, `INSERT INTO payment_orders (order_type,payment_method,amount,payment_status,expires_at,idempotency_key) VALUES ('CYCLE_CONTRIBUTION','MANUAL_TRANSFER',$1,'PENDING_REVIEW',CURRENT_TIMESTAMP + INTERVAL '24 hours',NULLIF($2,'')) RETURNING payment_order_id::text`, obligationAmount, idempotencyKey).Scan(&paymentOrderID)
 	if err == nil {
 		_, err = tx.Exec(ctx, `INSERT INTO obligation_payment_orders (payment_order_id,obligation_id) VALUES ($1,$2)`, paymentOrderID, obligationID)
 	}

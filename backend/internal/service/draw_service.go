@@ -73,6 +73,20 @@ func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map
 		return nil, err
 	}
 
+	if info.CycleStatus == "COMPLETED" || info.CycleStatus == "DISBURSED" {
+		existing, existingErr := s.repo.GetCycleAward(ctx, cycleID)
+		if existingErr != nil {
+			return nil, existingErr
+		}
+		if existing != nil {
+			return map[string]interface{}{
+				"award_id": existing.AwardID, "cycle_id": existing.CycleID,
+				"winner_user_id": existing.WinnerUserID, "winner_name": existing.WinnerName,
+				"award_method": existing.AwardMethod, "gross_amount": existing.GrossAmount,
+				"decision_hash": existing.DecisionHash, "idempotent_replay": true,
+			}, nil
+		}
+	}
 	if info.CycleStatus != "READY_FOR_DISBURSEMENT" {
 		return nil, errors.New("siklus harus berstatus READY_FOR_DISBURSEMENT sebelum pemenang dapat ditetapkan")
 	}
