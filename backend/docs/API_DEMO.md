@@ -2,7 +2,7 @@
 
 Base URL lokal: `http://localhost:8080/api/v1`. Jalankan migration berurutan
 `001_schema_v2.sql` → `002_core_hardening.sql` → `005_email_otp_identity.sql`
-→ `003_seed_demo_data.sql` → `004_audit_events.sql`.
+→ `003_seed_demo_data.sql` → `004_audit_events.sql` → `006_audit_actor_context.sql`.
 
 ## Authentication: email sandbox OTP
 

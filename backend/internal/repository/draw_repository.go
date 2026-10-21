@@ -93,8 +93,8 @@ type DrawRepository interface {
 	GetActiveBidsByCycle(ctx context.Context, cycleID string) ([]BidEntry, error)
 	GetUserBid(ctx context.Context, cycleID, userID string) (*BidEntry, error)
 	SaveBid(ctx context.Context, cycleID, userID string, bidRate float64) error
-	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
-	ExecuteRandomDrawTransaction(ctx context.Context, cycleID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
+	ExecuteSPSBDrawTransaction(ctx context.Context, cycleID, actorUserID string, winner BidEntry, winningRate, payableRate, grossAmount, netAmount float64, decisionHash string) (string, error)
+	ExecuteRandomDrawTransaction(ctx context.Context, cycleID, actorUserID string, winner ParticipantDB, grossAmount float64, decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int) (string, error)
 	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*AwardDB, error)
 	OpenCycleWithParticipantsAndObligations(ctx context.Context, circleID string, cycleNumber int, dueAt time.Time) (string, error)
@@ -324,6 +324,7 @@ func (r *drawRepo) GetUserBid(ctx context.Context, cycleID, userID string) (*Bid
 func (r *drawRepo) ExecuteSPSBDrawTransaction(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	winner BidEntry,
 	winningRate, payableRate, grossAmount, netAmount float64,
 	decisionHash string,
@@ -333,6 +334,9 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.actor_user_id', $1, true)`, actorUserID); err != nil {
+		return "", fmt.Errorf("failed to set audit actor: %w", err)
+	}
 
 	var awardID string
 	insertAwardQuery := `
@@ -395,6 +399,7 @@ func (r *drawRepo) ExecuteSPSBDrawTransaction(
 func (r *drawRepo) ExecuteRandomDrawTransaction(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	winner ParticipantDB,
 	grossAmount float64,
 	decisionHash, seedCommitment, seedReveal, snapshotHash string, participantCount int,
@@ -404,6 +409,9 @@ func (r *drawRepo) ExecuteRandomDrawTransaction(
 		return "", fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.actor_user_id', $1, true)`, actorUserID); err != nil {
+		return "", fmt.Errorf("failed to set audit actor: %w", err)
+	}
 
 	var awardID string
 	insertAwardQuery := `

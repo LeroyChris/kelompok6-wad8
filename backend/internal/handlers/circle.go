@@ -499,12 +499,21 @@ func (h *CircleHandler) GetCircleMembers(c *gin.Context) {
 
 // LockCircle mengunci status Circle
 func (h *CircleHandler) LockCircle(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
+		return
+	}
 	tx, err := h.DB.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memulai transaksi", nil))
 		return
 	}
 	defer tx.Rollback(c.Request.Context())
+	if _, err := tx.Exec(c.Request.Context(), `SELECT set_config('app.actor_user_id', $1, true)`, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal menetapkan pelaku audit", nil))
+		return
+	}
 
 	var limit, count int
 	var status string

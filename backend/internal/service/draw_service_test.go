@@ -44,11 +44,11 @@ func (s *drawRepoStub) SaveBid(context.Context, string, string, float64) error {
 	s.saved = true
 	return nil
 }
-func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _ string, winner repository.BidEntry, winningRate, payableRate, grossAmount, netAmount float64, _ string) (string, error) {
+func (s *drawRepoStub) ExecuteSPSBDrawTransaction(_ context.Context, _, _ string, winner repository.BidEntry, winningRate, payableRate, grossAmount, netAmount float64, _ string) (string, error) {
 	s.executed, s.winner, s.winningRate, s.payableRate, s.grossAmount, s.netAmount = true, winner, winningRate, payableRate, grossAmount, netAmount
 	return "award", nil
 }
-func (s *drawRepoStub) ExecuteRandomDrawTransaction(_ context.Context, _ string, winner repository.ParticipantDB, gross float64, _ string, _ string, _ string, _ string, _ int) (string, error) {
+func (s *drawRepoStub) ExecuteRandomDrawTransaction(_ context.Context, _, _ string, winner repository.ParticipantDB, gross float64, _ string, _ string, _ string, _ string, _ int) (string, error) {
 	s.randomExecuted, s.randomWinner, s.randomGross = true, winner, gross
 	return "award", nil
 }
@@ -77,7 +77,7 @@ func TestExecuteSPSBUsesSecondPriceAndPaidPot(t *testing.T) {
 			{ParticipantID: "faza", UserID: "user-b", FullName: "Leroy", BidRatePercent: 5.0},
 		},
 	}
-	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle", "actor")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestExecuteRandomDrawUsesEligibleCandidatesAndPaidPot(t *testing.T) {
 			{ParticipantID: "leroy", UserID: "user-b", Name: "Leroy"},
 		},
 	}
-	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle")
+	result, err := NewDrawService(repo).ExecuteCycleDraw(context.Background(), "cycle", "actor")
 	if err != nil {
 		t.Fatal(err)
 	}

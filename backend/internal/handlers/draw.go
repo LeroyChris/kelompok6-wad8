@@ -49,7 +49,12 @@ func (h *DrawHandler) GetCycleParticipants(c *gin.Context) {
 func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 
-	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID)
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Pengguna tidak terautentikasi", nil))
+		return
+	}
+	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID, userID)
 	if err != nil {
 		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", err.Error(), nil))
 		return

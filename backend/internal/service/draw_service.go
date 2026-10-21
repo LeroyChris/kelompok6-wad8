@@ -17,7 +17,7 @@ import (
 
 type DrawService interface {
 	GetParticipantsPaginated(ctx context.Context, cycleID string, page, pageSize int) ([]repository.ParticipantDB, dto.MetaPagination, error)
-	ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error)
+	ExecuteCycleDraw(ctx context.Context, cycleID, actorUserID string) (map[string]interface{}, error)
 	SubmitBid(ctx context.Context, cycleID, userID string, bidRate float64) error
 	GetCycleObligations(ctx context.Context, cycleID string, limit int, cursorTime *time.Time, cursorID string) ([]repository.ObligationDB, error)
 	GetCycleAward(ctx context.Context, cycleID string) (*repository.AwardDB, error)
@@ -66,7 +66,7 @@ func (s *drawService) GetParticipantsPaginated(ctx context.Context, cycleID stri
 }
 
 // Eksekusi Pemenang Siklus (Smart Routing: SPSB Auction atau Random Draw)
-func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map[string]interface{}, error) {
+func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID, actorUserID string) (map[string]interface{}, error) {
 	// 1. Ambil data Circle & Siklus
 	info, err := s.repo.GetCircleInfoByCycle(ctx, cycleID)
 	if err != nil {
@@ -101,16 +101,17 @@ func (s *drawService) ExecuteCycleDraw(ctx context.Context, cycleID string) (map
 
 	// 2. Cabang Logika Berdasarkan Track Type
 	if info.TrackType == "SPSB" {
-		return s.executeSPSBVickreyDraw(ctx, cycleID, info, grossAmount)
+		return s.executeSPSBVickreyDraw(ctx, cycleID, actorUserID, info, grossAmount)
 	}
 
-	return s.executeProvablyFairRandomDraw(ctx, cycleID, info, grossAmount)
+	return s.executeProvablyFairRandomDraw(ctx, cycleID, actorUserID, info, grossAmount)
 }
 
 // Logika Lelang SPSB (Second Price Sealed Bid / Vickrey Auction)
 func (s *drawService) executeSPSBVickreyDraw(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	info *repository.CircleCycleInfo,
 	grossAmount float64,
 ) (map[string]interface{}, error) {
@@ -144,7 +145,7 @@ func (s *drawService) executeSPSBVickreyDraw(
 
 	// Eksekusi Transaksi Atomis (Simpan Award, Catat Pencairan, Kredit Dompet)
 	awardID, err := s.repo.ExecuteSPSBDrawTransaction(
-		ctx, cycleID, winner, winningRate, payableRate, grossAmount, netAmount, decisionHash,
+		ctx, cycleID, actorUserID, winner, winningRate, payableRate, grossAmount, netAmount, decisionHash,
 	)
 	if err != nil {
 		return nil, err
@@ -170,6 +171,7 @@ func (s *drawService) executeSPSBVickreyDraw(
 func (s *drawService) executeProvablyFairRandomDraw(
 	ctx context.Context,
 	cycleID string,
+	actorUserID string,
 	info *repository.CircleCycleInfo,
 	grossAmount float64,
 ) (map[string]interface{}, error) {
@@ -204,7 +206,7 @@ func (s *drawService) executeProvablyFairRandomDraw(
 
 	// Eksekusi Transaksi Atomis (Simpan Award, Audit Trail, Pencairan ke Dompet Pemenang)
 	awardID, err := s.repo.ExecuteRandomDrawTransaction(
-		ctx, cycleID, winner, grossAmount, decisionHash, seedCommitment, hex.EncodeToString(seedBytes), hex.EncodeToString(snapshot[:]), len(candidates),
+		ctx, cycleID, actorUserID, winner, grossAmount, decisionHash, seedCommitment, hex.EncodeToString(seedBytes), hex.EncodeToString(snapshot[:]), len(candidates),
 	)
 	if err != nil {
 		return nil, err
