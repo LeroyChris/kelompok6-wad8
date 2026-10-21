@@ -10,14 +10,12 @@ TRUNCATE TABLE
     user_wallets,
     obligation_payment_orders,
     payment_proofs,
-    payment_events,
     payment_orders,
     disbursements,
     draw_results,
     cycle_awards,
     bids,
     cycle_obligations,
-    cycle_participant_substitutions,
     cycle_participants,
     arisan_cycles,
     circle_invitations,
@@ -31,12 +29,12 @@ CASCADE;
 -- ----------------------------------------------------------------------------
 -- 1. USERS & IDENTITIES
 -- ----------------------------------------------------------------------------
-INSERT INTO users (user_id, full_name, phone_number, email, account_status)
+INSERT INTO users (user_id, full_name, email, account_status)
 VALUES
-    ('11111111-1111-1111-1111-111111111111', 'Tiara Maharani', '081234567890', 'tiara@arisankita.id', 'ACTIVE'),
-    ('22222222-2222-2222-2222-222222222222', 'Abda Pratama', '081298765432', 'abda@arisankita.id', 'ACTIVE'),
-    ('33333333-3333-3333-3333-333333333333', 'Leroy Wijaya', '081311223344', 'leroy@arisankita.id', 'ACTIVE'),
-    ('44444444-4444-4444-4444-444444444444', 'Nadia Putri', '081599887766', 'nadia@arisankita.id', 'ACTIVE');
+    ('11111111-1111-1111-1111-111111111111', 'Tiara Maharani', 'tiara@arisankita.id', 'ACTIVE'),
+    ('22222222-2222-2222-2222-222222222222', 'Abda Pratama', 'abda@arisankita.id', 'ACTIVE'),
+    ('33333333-3333-3333-3333-333333333333', 'Leroy Wijaya', 'leroy@arisankita.id', 'ACTIVE'),
+    ('44444444-4444-4444-4444-444444444444', 'Nadia Putri', 'nadia@arisankita.id', 'ACTIVE');
 
 -- Trigger otomatis membuatkan user_wallets berisi Rp 5.000.000 untuk tiap user di atas.
 
@@ -45,7 +43,7 @@ INSERT INTO user_auth_identities (user_id, provider, provider_subject)
 VALUES
     ('11111111-1111-1111-1111-111111111111', 'EMAIL_OTP', 'tiara@arisankita.id'),
     ('22222222-2222-2222-2222-222222222222', 'EMAIL_OTP', 'abda@arisankita.id'),
-    ('33333333-3333-3333-333333333333', 'EMAIL_OTP', 'leroy@arisankita.id'),
+    ('33333333-3333-3333-3333-333333333333', 'EMAIL_OTP', 'leroy@arisankita.id'),
     ('44444444-4444-4444-4444-444444444444', 'EMAIL_OTP', 'nadia@arisankita.id');
 
 -- Rekening Bank User

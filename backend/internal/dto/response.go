@@ -26,7 +26,6 @@ type UserProfileResponse struct {
 	ID             string  `json:"id"`
 	FullName       string  `json:"full_name"`
 	Email          string  `json:"email"`
-	PhoneNumber    string  `json:"phone_number"`
 	AvatarURL      string  `json:"avatar_url"`
 	TotalWins      int     `json:"total_wins"`
 	TotalWinAmount float64 `json:"total_win_amount"`

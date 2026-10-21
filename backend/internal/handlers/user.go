@@ -39,7 +39,6 @@ func (h *UserHandler) GetUserProfile(c *gin.Context) {
 			u.user_id::text,
 			u.full_name,
 			COALESCE(u.email, ''),
-			COALESCE(u.phone_number, ''),
 			COUNT(ca.award_id),
 			COALESCE(SUM(ca.net_award_amount), 0)::float8,
 			u.created_at
@@ -48,7 +47,7 @@ func (h *UserHandler) GetUserProfile(c *gin.Context) {
 		LEFT JOIN cycle_participants cp ON cp.circle_membership_id = cm.circle_membership_id
 		LEFT JOIN cycle_awards ca ON ca.cycle_participant_id = cp.cycle_participant_id
 		WHERE u.user_id = $1
-		GROUP BY u.user_id, u.full_name, u.email, u.phone_number, u.created_at`
+		GROUP BY u.user_id, u.full_name, u.email, u.created_at`
 
 	var profile dto.UserProfileResponse
 	var createdAt time.Time
@@ -56,7 +55,6 @@ func (h *UserHandler) GetUserProfile(c *gin.Context) {
 		&profile.ID,
 		&profile.FullName,
 		&profile.Email,
-		&profile.PhoneNumber,
 		&profile.TotalWins,
 		&profile.TotalWinAmount,
 		&createdAt,
@@ -157,12 +155,12 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		UPDATE users
 		SET full_name = $1
 		WHERE user_id = $2
-		RETURNING user_id::text, full_name, COALESCE(email, ''), COALESCE(phone_number, ''), created_at`
+		RETURNING user_id::text, full_name, COALESCE(email, ''), created_at`
 
 	var profile dto.UserProfileResponse
 	var createdAt time.Time
 	err := h.DB.QueryRow(c.Request.Context(), query, strings.TrimSpace(req.FullName), userID).Scan(
-		&profile.ID, &profile.FullName, &profile.Email, &profile.PhoneNumber, &createdAt,
+		&profile.ID, &profile.FullName, &profile.Email, &createdAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,25 +183,28 @@ func (h *UserHandler) GetUserReputation(c *gin.Context) {
 
 	var response dto.ReputationResponse
 	err := h.DB.QueryRow(c.Request.Context(), `
+		WITH my_stats AS (
+			SELECT
+				COUNT(*) FILTER (WHERE co.obligation_status = 'PAID') AS total_paid,
+				COUNT(*) FILTER (WHERE co.obligation_status = 'OVERDUE') AS total_late
+			FROM circle_memberships cm
+			JOIN cycle_participants cp ON cp.circle_membership_id = cm.circle_membership_id
+			JOIN cycle_obligations co ON co.cycle_participant_id = cp.cycle_participant_id
+			WHERE cm.user_id = $1
+		)
 		SELECT
-			vr.user_id::text,
-			vr.reputation_score,
-			COUNT(*) FILTER (WHERE co.obligation_status = 'PAID') AS total_paid,
-			COUNT(*) FILTER (WHERE co.obligation_status = 'OVERDUE') AS total_late,
+			$1::text,
+			100 + (total_paid - total_late) AS reputation_score,
+			total_paid,
+			total_late,
 			COALESCE(
 				ROUND(
-					100.0 * COUNT(*) FILTER (WHERE co.obligation_status = 'PAID') /
-					NULLIF(COUNT(*) FILTER (WHERE co.obligation_status IN ('PAID', 'OVERDUE')), 0),
+					100.0 * total_paid / NULLIF(total_paid + total_late, 0),
 					2
 				),
 				100.0
 			)::float8 AS reliability_rate
-		FROM v_user_reputation vr
-		LEFT JOIN circle_memberships cm ON cm.user_id = vr.user_id
-		LEFT JOIN cycle_participants cp ON cp.circle_membership_id = cm.circle_membership_id
-		LEFT JOIN cycle_obligations co ON co.cycle_participant_id = cp.cycle_participant_id
-		WHERE vr.user_id = $1
-		GROUP BY vr.user_id, vr.reputation_score`, userID).Scan(
+		FROM my_stats`, userID).Scan(
 		&response.UserID,
 		&response.ReputationScore,
 		&response.TotalPaid,
