@@ -50,20 +50,11 @@ func (h *DrawHandler) ExecuteCycleDraw(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))
 
 	result, err := h.drawService.ExecuteCycleDraw(c.Request.Context(), cycleID)
-	if err == nil {
-		c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang putaran arisan berhasil ditetapkan dan dana dicairkan", result))
+	if err != nil {
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", err.Error(), nil))
 		return
 	}
-
-	// Safe Fallback Sandbox
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pengundian arisan berhasil dieksekusi (Sandbox)", gin.H{
-		"award_id":     "awd-" + cycleID,
-		"cycle_id":     cycleID,
-		"winner_name":  "Farrel Abda",
-		"gross_amount": 5000000,
-		"net_amount":   4800000,
-		"status":       "COMPLETED",
-	}))
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Pemenang putaran arisan berhasil ditetapkan dan dana dicairkan", result))
 }
 func (h *DrawHandler) SubmitCycleBid(c *gin.Context) {
 	cycleID := normalizeCycleID(c.Param("id"))

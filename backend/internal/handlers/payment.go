@@ -31,21 +31,6 @@ type ReviewProofInput struct {
 	ReviewNote   string `json:"review_note"`
 }
 
-func normalizeObligationID(id string) string {
-	switch id {
-	case "ob-01":
-		return "0b111111-0001-0000-0000-000000000001"
-	case "ob-02":
-		return "0b111111-0002-0000-0000-000000000002"
-	case "ob-03":
-		return "0b111111-0003-0000-0000-000000000003"
-	case "ob-04":
-		return "0b111111-0004-0000-0000-000000000004"
-	default:
-		return id
-	}
-}
-
 // advanceCycleAfterCollection moves a fully paid cycle to its next legal state.
 func advanceCycleAfterCollection(ctx context.Context, tx pgx.Tx, obligationID string) error {
 	_, err := tx.Exec(ctx, `
@@ -78,7 +63,7 @@ func (h *PaymentHandler) PayObligation(c *gin.Context) {
 		return
 	}
 
-	obligationID := normalizeObligationID(c.Param("id"))
+	obligationID := c.Param("id")
 	var input SubmitPaymentInput
 	_ = c.ShouldBindJSON(&input)
 
