@@ -214,6 +214,11 @@ func (h *CircleHandler) GetCircles(c *gin.Context) {
 		return
 	}
 	limit := circleLimit(c)
+	cursorTime, cursorID, err := decodeWalletCursor(c.Query("cursor"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "cursor tidak valid", nil))
+		return
+	}
 
 	rows, err := h.DB.Query(c.Request.Context(), `
 		SELECT c.circle_id::text, c.circle_name, c.track_type, c.contribution_amount::float8, c.member_limit, c.circle_status, cm.membership_role, COUNT(active_cm.circle_membership_id), c.created_at
@@ -221,16 +226,20 @@ func (h *CircleHandler) GetCircles(c *gin.Context) {
 		JOIN circles c ON c.circle_id = cm.circle_id
 		LEFT JOIN circle_memberships active_cm ON active_cm.circle_id = c.circle_id AND active_cm.membership_status = 'ACTIVE'
 		WHERE cm.user_id = $1 AND cm.membership_status = 'ACTIVE'
+		  AND ($2::timestamptz IS NULL OR (c.created_at, c.circle_id) < ($2::timestamptz, $3::uuid))
 		GROUP BY c.circle_id, cm.membership_role
 		ORDER BY c.created_at DESC, c.circle_id DESC
-		LIMIT $2`, userID, limit)
+		LIMIT $4`, userID, cursorTime, nullableString(cursorID), limit+1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil daftar circle", nil))
 		return
 	}
 	defer rows.Close()
 
-	items := make([]gin.H, 0)
+	items := make([]gin.H, 0, limit)
+	var nextCursor any
+	var lastCreatedAt time.Time
+	var lastID string
 	for rows.Next() {
 		var id, name, track, status, role string
 		var amount float64
@@ -239,6 +248,10 @@ func (h *CircleHandler) GetCircles(c *gin.Context) {
 		if err := rows.Scan(&id, &name, &track, &amount, &memberLimit, &status, &role, &count, &createdAt); err != nil {
 			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data circle tidak valid", nil))
 			return
+		}
+		if len(items) == limit {
+			nextCursor = encodeWalletCursor(lastCreatedAt, lastID)
+			break
 		}
 		items = append(items, gin.H{
 			"circle_id":           id,
@@ -250,11 +263,12 @@ func (h *CircleHandler) GetCircles(c *gin.Context) {
 			"circle_status":       status,
 			"membership_role":     role,
 		})
+		lastCreatedAt, lastID = createdAt, id
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar circle berhasil diambil", gin.H{
 		"items": items,
-		"meta":  gin.H{"limit": limit},
+		"meta":  gin.H{"limit": limit, "next_cursor": nextCursor},
 	}))
 }
 
