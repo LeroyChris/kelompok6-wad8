@@ -109,7 +109,7 @@ func main() {
 			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
-
+			circles.GET("/:id/payment-matrix", paymentHandler.GetPaymentMatrix)
 			// Relasi Siklus
 			circles.GET("/:id/cycles", drawHandler.GetCircleCycles)
 			circles.POST("/:id/cycles", drawHandler.CreateCircleCycle)

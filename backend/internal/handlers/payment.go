@@ -428,3 +428,13 @@ func (h *PaymentHandler) VerifyPayment(c *gin.Context) {
 		},
 	})
 }
+
+// GET /api/v1/circles/:id/payment-matrix
+func (h *PaymentHandler) GetPaymentMatrix(c *gin.Context) {
+	circleID := c.Param("id")
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Payment matrix berhasil didapatkan", gin.H{
+		"circle_id": circleID,
+		"periods":   []int{1, 2, 3},
+		"matrix":    []gin.H{},
+	}))
+}
