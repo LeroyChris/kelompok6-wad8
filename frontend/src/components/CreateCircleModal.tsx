@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, ShieldCheck, Zap, Users, HandCoins, Building2 } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { X, Zap, Users } from 'lucide-react';
 import { circleService } from '../services/circleService';
 
 export default function CreateCircleModal({
@@ -20,7 +20,7 @@ export default function CreateCircleModal({
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg('');
@@ -34,8 +34,8 @@ export default function CreateCircleModal({
       });
       onSuccess();
       onClose();
-    } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || 'Gagal membuat Circle baru.');
+    } catch {
+      setErrorMsg('Gagal membuat Circle baru.');
     } finally {
       setLoading(false);
     }

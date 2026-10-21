@@ -1,0 +1,5 @@
+export interface ApiEnvelope<T> { status: string; message: string; data: T }
+export interface Circle { circle_id: string; circle_name: string; track_type: 'SPSB' | 'RANDOM_DRAW'; contribution_amount: number; member_limit: number; active_member_count: number; circle_status: string; membership_role: string }
+export interface Cycle { cycle_id: string; circle_id: string; cycle_number: number; cycle_status: string; due_at: string; bidding_open_at?: string; bidding_close_at?: string }
+export interface Obligation { obligation_id: string; participant_id: string; user_id: string; full_name: string; amount_due: number; due_at: string; status: string }
+export interface Award { award_id: string; cycle_id: string; winner_name: string; winner_user_id: string; award_method: string; gross_amount: number; winning_bid_rate_percent?: number; payable_bid_rate_percent?: number; decision_hash: string; decided_at: string }
