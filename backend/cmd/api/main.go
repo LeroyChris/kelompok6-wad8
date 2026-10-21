@@ -27,7 +27,7 @@ func main() {
 	// CORS Setup untuk Frontend React Vite (localhost:5173)
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowOrigins = []string{"http://localhost:5173", "http://127.0.0.1:5173"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Idempotency-Key"}
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 	corsConfig.AllowCredentials = true
 	r.Use(cors.New(corsConfig))
@@ -66,10 +66,8 @@ func main() {
 		// Autentikasi & Identitas (Email OTP Self-Registration / Login)
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/email/request-otp", authHandler.RequestEmailOTP)
-			auth.POST("/email/verify-otp", authHandler.VerifyEmailOTP)
-			auth.POST("/request-otp", authHandler.RequestEmailOTP)
-			auth.POST("/verify-otp", authHandler.VerifyEmailOTP)
+			auth.POST("/otp/request", authHandler.RequestEmailOTP)
+			auth.POST("/otp/verify", authHandler.VerifyEmailOTP)
 		}
 
 		users := v1.Group("/users")
@@ -108,13 +106,14 @@ func main() {
 			circles.POST("/join", circleHandler.JoinCircle)
 			circles.GET("", circleHandler.GetCircles)
 			circles.GET("/:id", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleDetail)
+			circles.PATCH("/:id", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateCircle)
 			circles.POST("/:id/leave", circleHandler.LeaveCircle) // FIX RUTE KELUAR CIRCLE
 			circles.POST("/:id/lock", middleware.RequireCircleRole(db, "OWNER"), circleHandler.LockCircle)
 			circles.POST("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.CreateInvitation)
 			circles.GET("/:id/invitations", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), circleHandler.GetInvitations)
 			circles.GET("/:id/members", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), circleHandler.GetCircleMembers)
 			circles.PATCH("/:id/members/:userID", middleware.RequireCircleRole(db, "OWNER"), circleHandler.UpdateMember)
-			circles.GET("/:id/payment-matrix", paymentHandler.GetPaymentMatrix)
+			circles.GET("/:id/payment-matrix", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), paymentHandler.GetPaymentMatrix)
 
 			// Relasi Siklus
 			circles.GET("/:id/cycles", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCircleCycles)
@@ -137,7 +136,7 @@ func main() {
 			cycles.POST("/:id/bids", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
 			cycles.GET("/:id/bids/me", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetMyCycleBid)
 			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
-			cycles.POST("/:id/draw", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
+			cycles.POST("/:id/award/resolve", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
 			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
 			cycles.GET("/:id/draw-proof", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetDrawProof)
 		}

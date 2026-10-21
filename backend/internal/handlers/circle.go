@@ -80,7 +80,8 @@ func (h *CircleHandler) CreateGroup(c *gin.Context)    { h.CreateCircle(c) }
 func (h *CircleHandler) GetGroupDetail(c *gin.Context) { h.GetCircleDetail(c) }
 func (h *CircleHandler) JoinGroup(c *gin.Context)      { h.JoinCircle(c) }
 
-// CreateCircle membuat Circle baru, menetapkan OWNER, serta menginisialisasi Siklus 1 & Tagihan Awal secara atomic
+// CreateCircle membuat circle privat, menetapkan owner, dan membuat undangan
+// awal. Cycle baru hanya dibuat setelah owner mengunci circle yang penuh.
 func (h *CircleHandler) CreateCircle(c *gin.Context) {
 	userID, ok := authenticatedUserID(c)
 	if !ok {
@@ -155,30 +156,6 @@ func (h *CircleHandler) CreateCircle(c *gin.Context) {
 			VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_TIMESTAMP + INTERVAL '14 days')`, circleID, userID, code, inviteHash(code))
 	}
 
-	// 4. Inisialisasi Siklus 1
-	var cycleID string
-	if err == nil {
-		err = tx.QueryRow(c.Request.Context(), `
-			INSERT INTO arisan_cycles (circle_id, cycle_number, cycle_status, scheduled_date)
-			VALUES ($1, 1, 'SCHEDULED', CURRENT_TIMESTAMP + INTERVAL '30 days')
-			RETURNING cycle_id::text`, circleID).Scan(&cycleID)
-	}
-
-	// 5. Masukkan Owner ke Participant Siklus 1 & Buat Tagihan Awal
-	var participantID string
-	if err == nil {
-		err = tx.QueryRow(c.Request.Context(), `
-			INSERT INTO cycle_participants (cycle_id, circle_membership_id, is_eligible_for_award)
-			VALUES ($1, $2, TRUE)
-			RETURNING cycle_participant_id::text`, cycleID, membershipID).Scan(&participantID)
-	}
-
-	if err == nil {
-		_, err = tx.Exec(c.Request.Context(), `
-			INSERT INTO cycle_obligations (cycle_participant_id, obligation_amount, obligation_status)
-			VALUES ($1, $2, 'PENDING')`, participantID, in.ContributionAmount)
-	}
-
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal inisialisasi Circle", nil))
 		return
@@ -198,6 +175,35 @@ func (h *CircleHandler) CreateCircle(c *gin.Context) {
 		"invite_code":          code,
 		"circle_membership_id": membershipID,
 	}))
+}
+
+// UpdateCircle permits an owner to rename a recruiting circle. Financial and
+// membership parameters are immutable once created to preserve cycle rules.
+func (h *CircleHandler) UpdateCircle(c *gin.Context) {
+	var in UpdateCircleInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nama circle wajib diisi", nil))
+		return
+	}
+	name := strings.TrimSpace(in.CircleName)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Nama circle wajib diisi", nil))
+		return
+	}
+	var status string
+	err := h.DB.QueryRow(c.Request.Context(), `
+		UPDATE circles SET circle_name=$1
+		WHERE circle_id=$2 AND circle_status IN ('DRAFT','RECRUITING')
+		RETURNING circle_status`, name, c.Param("id")).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		c.JSON(http.StatusConflict, dto.BuildResponse(http.StatusConflict, "error", "Circle tidak ditemukan atau tidak dapat diubah setelah dikunci", nil))
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memperbarui circle", nil))
+		return
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Circle berhasil diperbarui", gin.H{"circle_id": c.Param("id"), "circle_name": name, "circle_status": status}))
 }
 
 // GetCircles mengambil daftar Circle yang diikuti pengguna
@@ -564,6 +570,36 @@ func (h *CircleHandler) CreateInvitation(c *gin.Context) {
 		"invite_code":   code,
 		"expires_at":    expiry.Format(time.RFC3339),
 	}))
+}
+
+// GetInvitations lists invitations for an owner or admin. The route's RBAC
+// middleware verifies the caller before this handler is entered.
+func (h *CircleHandler) GetInvitations(c *gin.Context) {
+	rows, err := h.DB.Query(c.Request.Context(), `
+		SELECT invitation_id::text, invite_code, invitation_status, expires_at,
+			accepted_by_user_id::text, accepted_at, created_at
+		FROM circle_invitations
+		WHERE circle_id=$1
+		ORDER BY created_at DESC, invitation_id DESC
+		LIMIT $2`, c.Param("id"), circleLimit(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil undangan", nil))
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var id, code, status string
+		var expiresAt, createdAt time.Time
+		var acceptedBy *string
+		var acceptedAt *time.Time
+		if err := rows.Scan(&id, &code, &status, &expiresAt, &acceptedBy, &acceptedAt, &createdAt); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data undangan tidak valid", nil))
+			return
+		}
+		items = append(items, gin.H{"invitation_id": id, "invite_code": code, "invitation_status": status, "expires_at": expiresAt, "accepted_by_user_id": acceptedBy, "accepted_at": acceptedAt, "created_at": createdAt})
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Daftar undangan berhasil diambil", gin.H{"items": items, "meta": gin.H{"limit": circleLimit(c)}}))
 }
 
 // UpdateMember memperbarui role atau status anggota

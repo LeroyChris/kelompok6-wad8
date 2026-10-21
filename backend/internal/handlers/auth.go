@@ -47,8 +47,10 @@ func sandboxEnabled() bool {
 
 func generateToken(userID, email string) (string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
-	// Fallback secret untuk environment development/lokal agar tidak crash
 	if jwtSecret == "" {
+		if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
+			return "", errors.New("JWT_SECRET wajib dikonfigurasi di production")
+		}
 		jwtSecret = "arisankita_secret_key_development_mode_2026"
 	}
 
@@ -69,7 +71,7 @@ func (h *AuthHandler) findUserByEmail(ctx *gin.Context, email string) (userID, f
 		SELECT u.user_id::text, u.full_name, COALESCE(u.email, '')
 		FROM user_auth_identities uai
 		JOIN users u ON u.user_id = uai.user_id
-		WHERE uai.provider = 'GOOGLE'
+		WHERE uai.provider = 'EMAIL_OTP'
 		  AND LOWER(uai.provider_subject) = LOWER($1)
 		  AND u.account_status = 'ACTIVE'
 		LIMIT 1`, strings.TrimSpace(email)).Scan(&userID, &fullName, &userEmail)
@@ -107,7 +109,7 @@ func (h *AuthHandler) RequestEmailOTP(c *gin.Context) {
 		if err == nil {
 			_, err = tx.Exec(c.Request.Context(), `
 				INSERT INTO user_auth_identities (user_id, provider, provider_subject)
-				VALUES ($1, 'GOOGLE', $2)`, newUserID, cleanEmail)
+				VALUES ($1, 'EMAIL_OTP', $2)`, newUserID, cleanEmail)
 		}
 
 		if err != nil {

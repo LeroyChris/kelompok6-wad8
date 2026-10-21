@@ -23,11 +23,7 @@ func NewPaymentHandler(db *pgxpool.Pool) *PaymentHandler {
 }
 
 type SubmitPaymentInput struct {
-	GroupMemberID string  `json:"group_member_id"`
-	PeriodNumber  int     `json:"period_number"`
-	Amount        float64 `json:"amount"`
-	ProofURL      string  `json:"proof_url"`
-	PaymentMethod string  `json:"payment_method"` // WALLET, MANUAL_TRANSFER
+	PaymentMethod string `json:"payment_method"` // WALLET, MANUAL_TRANSFER
 }
 
 type ReviewProofInput struct {
@@ -510,66 +506,37 @@ func (h *PaymentHandler) HandlePaymentGatewayWebhook(c *gin.Context) {
 	}))
 }
 
-// POST /api/v1/payments (Legacy frontend alias)
-func (h *PaymentHandler) SubmitPayment(c *gin.Context) {
-	var input SubmitPaymentInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"status":  "success",
-		"message": "Bukti pembayaran berhasil dikirim",
-		"data": gin.H{
-			"payment_id":      "pay-uuid-501",
-			"group_member_id": input.GroupMemberID,
-			"period_number":   input.PeriodNumber,
-			"amount":          input.Amount,
-			"proof_url":       input.ProofURL,
-			"status":          "pending",
-		},
-	})
-}
-
-// GET /api/v1/payments/group/:id (Legacy frontend alias)
-func (h *PaymentHandler) GetGroupPayments(c *gin.Context) {
-	groupID := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{
-		"status":   "success",
-		"group_id": groupID,
-		"data": []gin.H{
-			{"payment_id": "pay-uuid-501", "member_name": "Farrel Abda", "period_number": 1, "amount": 500000, "status": "verified"},
-			{"payment_id": "pay-uuid-502", "member_name": "Roy", "period_number": 1, "amount": 500000, "status": "pending"},
-		},
-	})
-}
-
-// PATCH /api/v1/payments/:id/verify (Legacy frontend alias)
-func (h *PaymentHandler) VerifyPayment(c *gin.Context) {
-	paymentID := c.Param("id")
-	var input VerifyPaymentInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": "Status pembayaran berhasil diperbarui",
-		"data": gin.H{
-			"payment_id": paymentID,
-			"status":     input.Status,
-		},
-	})
-}
-
 // GET /api/v1/circles/:id/payment-matrix
 func (h *PaymentHandler) GetPaymentMatrix(c *gin.Context) {
-	circleID := c.Param("id")
-	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Payment matrix berhasil didapatkan", gin.H{
-		"circle_id": circleID,
-		"periods":   []int{1, 2, 3},
-		"matrix":    []gin.H{},
-	}))
+	rows, err := h.DB.Query(c.Request.Context(), `
+		SELECT co.obligation_id::text, u.full_name, co.amount_due::float8,
+			co.obligation_status, po.payment_method, po.paid_at, ac.cycle_number
+		FROM cycle_obligations co
+		JOIN cycle_participants cp ON cp.cycle_participant_id=co.cycle_participant_id
+		JOIN circle_memberships cm ON cm.circle_membership_id=cp.circle_membership_id
+		JOIN users u ON u.user_id=cm.user_id
+		JOIN arisan_cycles ac ON ac.cycle_id=cp.cycle_id
+		LEFT JOIN obligation_payment_orders opo ON opo.obligation_id=co.obligation_id
+		LEFT JOIN payment_orders po ON po.payment_order_id=opo.payment_order_id AND po.payment_status='PAID'
+		WHERE ac.circle_id=$1
+		ORDER BY ac.cycle_number DESC, u.full_name ASC`, c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal mengambil matriks pembayaran", nil))
+		return
+	}
+	defer rows.Close()
+	items := make([]gin.H, 0)
+	for rows.Next() {
+		var id, name, status string
+		var amount float64
+		var method *string
+		var paidAt *time.Time
+		var cycleNumber int
+		if err := rows.Scan(&id, &name, &amount, &status, &method, &paidAt, &cycleNumber); err != nil {
+			c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Data matriks tidak valid", nil))
+			return
+		}
+		items = append(items, gin.H{"obligation_id": id, "full_name": name, "amount_due": amount, "obligation_status": status, "payment_method": method, "paid_at": paidAt, "cycle_number": cycleNumber})
+	}
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Matriks pembayaran berhasil diambil", gin.H{"items": items}))
 }

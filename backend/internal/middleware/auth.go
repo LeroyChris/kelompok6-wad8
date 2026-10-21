@@ -34,11 +34,14 @@ func AuthMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 		jwtSecret := os.Getenv("JWT_SECRET")
 		if jwtSecret == "" {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"status":  "error",
-				"message": "JWT_SECRET belum dikonfigurasi",
-			})
-			return
+			if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"status":  "error",
+					"message": "JWT_SECRET belum dikonfigurasi",
+				})
+				return
+			}
+			jwtSecret = "arisankita_secret_key_development_mode_2026"
 		}
 
 		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {

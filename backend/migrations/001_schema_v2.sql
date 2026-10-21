@@ -51,7 +51,7 @@ CREATE TABLE user_auth_identities (
     identity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     provider VARCHAR(30) NOT NULL
-        CHECK (provider IN ('PHONE_OTP', 'GOOGLE', 'PASSWORD')),
+        CHECK (provider IN ('EMAIL_OTP', 'PHONE_OTP', 'GOOGLE', 'PASSWORD')),
     provider_subject VARCHAR(255) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (provider, provider_subject)
