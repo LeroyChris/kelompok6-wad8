@@ -13,6 +13,7 @@ const nextConfig = {
   // Pastikan env vars yang dimulai dengan NEXT_PUBLIC_ diekspos
   experimental: {
     appDir: true,
+    agentUpgrade: "security",
   },
 }
 
