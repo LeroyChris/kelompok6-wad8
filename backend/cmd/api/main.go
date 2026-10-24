@@ -69,10 +69,12 @@ func main() {
 		{
 			auth.POST("/otp/request", authHandler.RequestEmailOTP)
 			auth.POST("/otp/verify", authHandler.VerifyEmailOTP)
+			auth.POST("/login", authHandler.Login)
 		}
 
 		users := v1.Group("/users")
 		users.Use(middleware.AuthMiddleware())
+		users.Use(middleware.RBACWithClaimsMiddleware(middleware.RoleUser))
 		{
 			users.GET("/me", userHandler.GetUserProfile)
 			users.PATCH("/me", userHandler.UpdateProfile)
@@ -135,12 +137,12 @@ func main() {
 			cycles.GET("/:id", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleDetail)
 			cycles.GET("/:id/participants", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleParticipants)
 			cycles.GET("/:id/obligations", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleObligations)
-			cycles.POST("/:id/bids", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
+			cycles.POST("/:id/bids", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.SubmitCycleBid)
 			cycles.GET("/:id/bids/me", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetMyCycleBid)
-			cycles.POST("/:id/bidding/close", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
-			cycles.POST("/:id/award/resolve", middleware.RequireCycleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
-			cycles.GET("/:id/award", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
-			cycles.GET("/:id/draw-proof", middleware.RequireCycleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetDrawProof)
+			cycles.POST("/:id/bidding/close", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), drawHandler.CloseBidding)
+			cycles.POST("/:id/award/resolve", middleware.RequireCircleRole(db, "OWNER", "ADMIN"), drawHandler.ExecuteCycleDraw)
+			cycles.GET("/:id/award", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetCycleAward)
+			cycles.GET("/:id/draw-proof", middleware.RequireCircleRole(db, "OWNER", "ADMIN", "MEMBER"), drawHandler.GetDrawProof)
 		}
 
 		// Pembayaran & Tagihan
