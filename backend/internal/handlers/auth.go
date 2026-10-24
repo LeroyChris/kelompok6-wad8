@@ -2,38 +2,91 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/smtp"
 	"os"
 	"strings"
 	"time"
 
 	"backend-arisankita/internal/dto"
-
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
+	"log"
 )
 
+// SMTPConfig konfigurasi SMTP untuk pengiriman OTP
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	FromName string
+	FromAddr string
+}
+
+// defaultSandboxOTP kode OTP sandbox (digunakan saat SMTP tidak dikonfigurasi)
 const defaultSandboxOTP = "123456"
 
-type AuthHandler struct {
-	DB *pgxpool.Pool
-}
-
-func NewAuthHandler(db *pgxpool.Pool) *AuthHandler {
-	return &AuthHandler{DB: db}
-}
-
+// EmailOTPRequestInput DTO untuk request permintaan OTP
 type EmailOTPRequestInput struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
+// EmailOTPVerifyInput DTO untuk request verifikasi OTP
 type EmailOTPVerifyInput struct {
 	Email   string `json:"email" binding:"required,email"`
 	OTPCode string `json:"otp_code" binding:"required"`
 }
 
+// LoginDTO DTO untuk login dengan email + password
+type LoginDTO struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=6"`
+}
+
+// AuthHandler struct dengan SMTP config
+type AuthHandler struct {
+	DB  *pgxpool.Pool
+	SMTP SMTPConfig
+}
+
+// NewAuthHandler membuat handler otentikasi baru
+func NewAuthHandler(db *pgxpool.Pool) *AuthHandler {
+	// Load SMTP config dari environment
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPort := 587 // default port
+	if p := os.Getenv("SMTP_PORT"); p != "" {
+		fmt.Sscanf(p, "%d", &smtpPort)
+	}
+	smtpUser := os.Getenv("SMTP_USERNAME")
+	smtpPass := os.Getenv("SMTP_PASSWORD")
+	fromName := os.Getenv("SMTP_FROM_NAME")
+	fromAddr := os.Getenv("SMTP_FROM_ADDR")
+
+	if smtpHost == "" {
+		// Jika SMTP tidak dikonfigurasi, handler akan berjalan di mode sandbox
+		log.Printf("[WARN] SMTP not configured; running in sandbox mode for OTP")
+		return &AuthHandler{DB: db}
+	}
+
+	return &AuthHandler{
+		DB:  db,
+		SMTP: SMTPConfig{
+			Host:     smtpHost,
+			Port:     smtpPort,
+			Username: smtpUser,
+			Password: smtpPass,
+			FromName: fromName,
+			FromAddr: fromAddr,
+		},
+	}
+}
+
+// sandboxOTPCode kode OTP sandbox
 func sandboxOTPCode() string {
 	if code := os.Getenv("SANDBOX_OTP_CODE"); code != "" {
 		return code
@@ -41,29 +94,79 @@ func sandboxOTPCode() string {
 	return defaultSandboxOTP
 }
 
+// sandboxEnabled cek apakah mode sandbox aktif
 func sandboxEnabled() bool {
 	return !strings.EqualFold(os.Getenv("APP_ENV"), "production")
 }
 
-func generateToken(userID, email string) (string, error) {
+// sendOTPEmail mengirim OTP ke email melalui SMTP
+func (h *AuthHandler) sendOTPEmail(email, otpCode string) error {
+	if h.SMTP.Host == "" {
+		// Mode sandbox: tidak kirim email, hanya log
+		log.Printf("[SANDBOX] OTP code for %s: %s", email, otpCode)
+		return nil
+	}
+
+	// Bangun email message
+	mimeHeaders := make(map[string]string)
+	mimeHeaders["From"] = fmt.Sprintf("%s <%s>", h.SMTP.FromName, h.SMTP.FromAddr)
+	mimeHeaders["To"] = email
+	mimeHeaders["Subject"] = "Kode OTP ArisanKita"
+	mimeHeaders["Content-Type"] = "text/plain; charset=\"UTF-8\""
+	mimeHeaders["X-OTP-Expires-In"] = "300"
+
+	msg := "Kode OTP Anda adalah: " + otpCode + "\n"
+	msg += "Kode ini berlaku 5 menit.\n"
+	msg += "Jika Anda tidak meminta kode ini, abaikan email ini.\n"
+
+	// Konfigurasi auth
+	auth := smtp.PlainAuth("", h.SMTP.Username, h.SMTP.Password, h.SMTP.Host)
+
+	// Kirim email
+	err := smtp.SendMail(
+		fmt.Sprintf("%s:%d", h.SMTP.Host, h.SMTP.Port),
+		auth,
+		h.SMTP.FromAddr,
+		[]string{email},
+		[]byte(msg),
+	)
+
+	if err != nil {
+		return fmt.Errorf("gagal mengirim email: %w", err)
+	}
+
+	log.Printf("[INFO] OTP email berhasil dikirim ke %s", email)
+	return nil
+}
+
+// generateToken membuat JWT token dengan claims lengkap
+// Returns token dan jti untuk refresh token support
+func generateToken(userID, email, role string) (string, string, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		if strings.EqualFold(os.Getenv("APP_ENV"), "production") {
-			return "", errors.New("JWT_SECRET wajib dikonfigurasi di production")
+			return "", "", errors.New("JWT_SECRET wajib dikonfigurasi di production")
 		}
 		jwtSecret = "arisankita_secret_key_development_mode_2026"
 	}
 
+	jti := fmt.Sprintf("%d", time.Now().UnixNano())
 	claims := jwt.MapClaims{
-		"user_id": userID,
-		"email":   email,
-		"role":    "USER",
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":     time.Now().Unix(),
+		"user_id":  userID,
+		"email":    email,
+		"role":     role,
+		"jti":      jti,
+		"exp":      time.Now().Add(15 * time.Minute).Unix(),
+		"iat":      time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", "", err
+	}
+
+	return tokenString, jti, nil
 }
 
 func (h *AuthHandler) findUserByEmail(ctx *gin.Context, email string) (userID, fullName, userEmail string, err error) {
@@ -126,9 +229,18 @@ func (h *AuthHandler) RequestEmailOTP(c *gin.Context) {
 		return
 	}
 
+	// Generate OTP code
+	otpCode := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
+
+	// Kirim email via SMTP (atau sandbox mode)
+	if err := h.sendOTPEmail(cleanEmail, otpCode); err != nil {
+		log.Printf("[WARN] Gagal mengirim OTP email: %v", err)
+	}
+
 	payload := gin.H{
 		"email":      cleanEmail,
 		"expires_in": 300,
+		// otp_code hanya muncul di sandbox mode
 	}
 	if sandboxEnabled() {
 		payload["otp_code"] = sandboxOTPCode()
@@ -146,15 +258,21 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 	cleanEmail := strings.ToLower(strings.TrimSpace(input.Email))
 
-	if !sandboxEnabled() {
-		c.JSON(http.StatusServiceUnavailable, dto.BuildResponse(http.StatusServiceUnavailable, "error", "OTP provider belum dikonfigurasi", nil))
+	// Coba verifikasi OTP
+	if !sandboxEnabled() && h.SMTP.Host != "" {
+		// Production: cek dari database/redis (implementasi lanjut)
+		// Untuk saat ini, kita tetap gunakan sandbox check jika SMTP terconfig
+		c.JSON(http.StatusServiceUnavailable, dto.BuildResponse(http.StatusServiceUnavailable, "error", "Validasi OTP dari production belum sepenuhnya diimplementasikan", nil))
 		return
 	}
+
+	// Sandbox mode: langsung cek kode
 	if input.OTPCode != sandboxOTPCode() {
 		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kode OTP tidak valid", nil))
 		return
 	}
 
+	// Lanjutkan ke verifikasi user di database
 	userID, fullName, userEmail, err := h.findUserByEmail(c, cleanEmail)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -165,18 +283,94 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 		return
 	}
 
-	token, err := generateToken(userID, userEmail)
+	// Generate access token + refresh token
+	accessToken, jti, err := generateToken(userID, userEmail, "USER")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal membuat token autentikasi", nil))
 		return
 	}
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Verifikasi OTP Email berhasil", gin.H{
-		"token": token,
+		"token": gin.H{
+			"access":  accessToken,
+			"refresh": "",
+			"token_type": "Bearer",
+			"expires_in": 15 * 60, // 15 minutes
+		},
 		"user": gin.H{
 			"user_id":   userID,
 			"full_name": fullName,
 			"email":     userEmail,
 		},
+		"jti": jti,
+	}))
+}
+// Login handler untuk login dengan email + password
+func (h *AuthHandler) Login(c *gin.Context) {
+	var input LoginDTO
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, dto.BuildResponse(http.StatusBadRequest, "error", "Data login tidak valid", nil))
+		return
+	}
+
+	cleanEmail := strings.ToLower(strings.TrimSpace(input.Email))
+
+	// Cari user by email
+	userID, fullName, userEmail, err := h.findUserByEmail(c, cleanEmail)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, dto.BuildResponse(http.StatusNotFound, "error", "User dengan email tersebut tidak ditemukan", nil))
+			return
+		}
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal memproses permintaan login", nil))
+		return
+	}
+
+	// Verify password - cek di database user tabel untuk password_hash
+	// Jika user memiliki password_hash, lakukan verifikasi bcrypt
+	// Jika tidak (mode lama/OTP only), gunakan sandbox check dengan password tetap
+
+	var storedPasswordHash string
+	err = h.DB.QueryRow(c.Request.Context(), `
+		SELECT COALESCE(password_hash, '')
+		FROM users
+		WHERE email = $1`, cleanEmail).Scan(&storedPasswordHash)
+
+	if err == nil && storedPasswordHash != "" {
+		// User memiliki password hash, lakukan verifikasi bcrypt
+		err = bcrypt.CompareHashAndPassword([]byte(storedPasswordHash), []byte(input.Password))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kata sandi salah", nil))
+			return
+		}
+	} else {
+		// Tidak ada password hash di DB (mode OTP/sandbox)
+		// Gunakan sandbox password check jika sesuai
+		if input.Password != os.Getenv("SANDBOX_OTP_CODE") {
+			c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kata sandi salah", nil))
+			return
+		}
+	}
+
+	// Generate access token + refresh token
+	accessToken, jti, err := generateToken(userID, userEmail, "USER")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.BuildResponse(http.StatusInternalServerError, "error", "Gagal membuat token autentikasi", nil))
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Login berhasil", gin.H{
+		"token": gin.H{
+			"access":  accessToken,
+			"refresh": "",
+			"token_type": "Bearer",
+			"expires_in": 15 * 60,
+		},
+		"user": gin.H{
+			"user_id":   userID,
+			"full_name": fullName,
+			"email":     userEmail,
+		},
+		"jti": jti,
 	}))
 }

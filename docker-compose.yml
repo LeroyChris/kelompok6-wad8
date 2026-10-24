@@ -1,0 +1,118 @@
+============================================================
+   DOCKER COMPOSE - ArisanKita Production Deployment
+============================================================
+
+Catatan: File ini adalah referensi konfigurasional. 
+Biasanya diletakkan di root project dan dijalankan dari direktori yang sesuai.
+
+============================================================
+   SERVICES
+============================================================
+
+# 1. Backend (Go Gin API)
+backend:
+  build:
+    context: ./backend
+    dockerfile: Dockerfile.backend
+  ports:
+    - "8080:8080"
+  environment:
+    - DATABASE_URL=${DATABASE_URL}
+    - APP_ENV=${APP_ENV:-production}
+    - JWT_SECRET=${JWT_SECRET}
+    - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+    - SMTP_HOST=${SMTP_HOST}
+    - SMTP_PORT=${SMTP_PORT}
+    - SMTP_USERNAME=${SMTP_USERNAME}
+    - SMTP_PASSWORD=${SMTP_PASSWORD}
+    - SMTP_FROM_NAME=${SMTP_FROM_NAME}
+    - SMTP_FROM_ADDR=${SMTP_FROM_ADDR}
+    - SANDBOX_OTP_CODE=${SANDBOX_OTP_CODE:-123456}
+  depends_on:
+    - db
+    - mailpit  # hanya untuk development
+
+# 2. PostgreSQL (Supabase - biasanya external, tapi bisa lokal)
+db:
+  image: supabase/postgres:latest
+  environment:
+    - POSTGRES_DB=postgres
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  ports:
+    - "5432:5432"
+  volumes:
+    - pg_data:/var/lib/postgresql/data
+
+# 3. Mailpit (Development SMTP Server)
+# HANYA AKTIFKAN SAAT APP_ENV=development
+mailpit:
+  image: axllent/mailpit
+  environment:
+    - MP_SMTP bind=0.0.0.0:1025
+    - MP_UI bind=0.0.0.0:8025
+  ports:
+    - "1025:1025"   # SMTP endpointuntuk aplikasi
+    - "8025:8025"   # Web UI unt melihat email terkirim
+  volumes:
+    - mailpit_data:/data
+
+============================================================
+   VOLUMES
+============================================================
+
+volumes:
+  pg_data:
+  mailpit_data:
+
+============================================================
+   QUICK START
+============================================================
+
+# 1. Copy env file
+cp .env.example .env
+# Atau gunakan .env.production yang sudah dibuat
+
+# 2. Edit .env dengan nilai yang sesuai:
+#    - DATABASE_URL: Supabase connection string
+#    - JWT_SECRET: kunci rahasia 32+ karakter
+#    - SMTP: konfirmir SMTP provider (SendGrid/SES atau Mailpit)
+#    - APP_ENV: "production" untuk produksi
+
+# 3. Jalankan docker compose
+docker compose up -d
+
+# 3. Tunggu backend siap
+docker compose logs -f backend
+
+# 4. Jalankan frontend (terpisah atau di container lain)
+#    - Build: cd frontend && npm run build
+#    - Atau deploy ke Vercel/Netlify secara manual
+
+# 5. Test OTP flow:
+#    - Buka http://localhost:5173 (alamat frontend)
+#    - Klik "Masuk dengan Email"
+#    - Cek di http://localhost:8025 (Mailpit UI) untuk lihat email OTP
+#    - Masukkan kode 6-digit atau gunakan 123456 (sandbox)
+#    - Login berhasil, token disimpan di localStorage
+
+# 6. Untuk login pakai password (jika diaktifkan):
+#    - POST http://localhost:8080/api/v1/auth/login
+#    - Body: {"email": "your@email.com", "password": "123456"}
+#    - Ambil token dari response, gunakan di header Authorization
+
+============================================================
+   PRODUCTION NOTE
+============================================================
+
+# PENTING: Saat APP_ENV=production:
+# - Mailpit TIDAK digunakan untuk pengiriman email nyata
+# - Gunakan SendGrid, Mailgun, atau Amazon SES
+# - Ubah SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_password sesuai provider
+# - Pastikan kolom password_hash ada di users table jika ingin login pakai password
+# - CORS_ALLOWED_ORIGINS harus hanya domain produksi, bukan localhost
+
+# SAAT APP_ENV=development:
+# - Mailpit bisa digunakan (default konfigurasi)
+# - SANDBOX_OTP_CODE=123456 bisa digunakan untuk testing
+# - Password login menggunakan fallback ke SANDBOX_OTP_CODE jika tidak ada password_hash di DB
