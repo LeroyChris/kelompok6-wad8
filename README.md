@@ -48,12 +48,17 @@ Product scope dan kontrak backend resmi tersedia di [`prd.md`](./prd.md).
 .
 ├── backend/                  # RESTful API Go Gin
 │   ├── cmd/api/main.go       # Server entry point & routing
-│   ├── internal/             # Core logic (models, repository, service, handlers)
+│   ├── internal/             # Core logic (models, handlers, service, middleware)
 │   ├── migrations/           # Database DDL & schema migrations
+│   ├── docs/                 # Panduan API & query referensi
+│   ├── .env.example          # Template environment backend
 │   └── README.md             # Dokumentasi internal backend
 ├── frontend/                 # Client Single Page Application (SPA)
-│   ├── src/                  # React components, pages & UI
-│   └── package.json
+│   ├── src/                  # React pages, komponen, API client
+│   ├── .env.example          # Template environment frontend
+│   ├── package.json
+│   └── README.md             # Dokumentasi internal frontend
+├── prd.md                    # Product & API contract (SSOT)
 ├── .gitignore                # Repository ignore rules
 └── README.md                 # Dokumentasi publik proyek
 ```
@@ -63,13 +68,13 @@ Product scope dan kontrak backend resmi tersedia di [`prd.md`](./prd.md).
 ## 🚀 Memulai (Getting Started)
 
 ### Prasyarat
-- [Go](https://go.dev/) (versi 1.22 atau lebih baru)
+- [Go](https://go.dev/) (versi 1.27 atau lebih baru)
 - [Node.js](https://nodejs.org/) (versi 20 atau lebih baru) & npm
 - PostgreSQL database (lokal atau cloud instance seperti Supabase/Neon)
 
 ### 1. Kloning Repositori
 ```bash
-git clone https://github.com/roychrstpr/kelompok6-wad8.git
+git clone https://github.com/LeroyChris/kelompok6-wad8.git
 cd kelompok6-wad8
 ```
 
@@ -95,10 +100,25 @@ API server aktif di `http://localhost:8080`.
 ### 4. Menjalankan Frontend
 ```bash
 cd ../frontend
+cp .env.example .env       # opsional: sesuaikan VITE_API_BASE_URL
 npm install
 npm run dev
 ```
 Aplikasi web aktif di `http://localhost:5173`.
+
+### 5. Login Demo
+Backend harus berjalan di `http://localhost:8080` dengan database yang sudah di-seed.
+Login memakai **email + OTP**. Saat `APP_ENV=development` (sandbox), kode OTP-nya
+`123456`. Akun seed:
+
+| Email | Peran |
+|---|---|
+| `tiara@arisankita.id` | Owner circle Random Draw |
+| `abda@arisankita.id` | Owner circle SPSB |
+| `leroy@arisankita.id` | Anggota |
+| `nadia@arisankita.id` | Anggota |
+
+Alur login, endpoint, dan contoh `curl` ada di [`backend/docs/API_DEMO.md`](./backend/docs/API_DEMO.md).
 
 ---
 
