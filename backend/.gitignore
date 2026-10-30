@@ -1,0 +1,13 @@
+# Binaries & build output
+/main
+/exe/
+*.exe
+*.test
+*.out
+coverage.out
+/dist/
+
+# Local environment (keep the template)
+.env
+.env.*
+!.env.example

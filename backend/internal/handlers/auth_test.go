@@ -52,3 +52,20 @@ func TestRandomOTPCodeFormat(t *testing.T) {
 		t.Fatalf("randomOTPCode() = %q, want 6 digits", code)
 	}
 }
+
+func TestSandboxPasswordFallback(t *testing.T) {
+	t.Setenv("SANDBOX_OTP_CODE", "123456")
+
+	t.Setenv("APP_ENV", "development")
+	if !sandboxPasswordFallback("123456") {
+		t.Fatal("sandbox fallback should accept the sandbox code in development")
+	}
+	if sandboxPasswordFallback("000000") {
+		t.Fatal("sandbox fallback should reject a wrong code")
+	}
+
+	t.Setenv("APP_ENV", "production")
+	if sandboxPasswordFallback("123456") {
+		t.Fatal("sandbox fallback must be disabled in production")
+	}
+}
