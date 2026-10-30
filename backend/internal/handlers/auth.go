@@ -153,6 +153,12 @@ func (h *AuthHandler) consumeOTP(email, code string) bool {
 	return true
 }
 
+// sandboxPasswordFallback memutuskan apakah login password (tanpa password_hash)
+// boleh jatuh ke kode sandbox. Hanya aktif di mode sandbox, bukan production.
+func sandboxPasswordFallback(password string) bool {
+	return sandboxEnabled() && password == sandboxOTPCode()
+}
+
 // sendOTPEmail mengirim OTP ke email melalui SMTP
 func (h *AuthHandler) sendOTPEmail(email, otpCode string) error {
 	if h.SMTP.Host == "" {
@@ -402,9 +408,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			return
 		}
 	} else {
-		// Tidak ada password hash di DB (mode OTP/sandbox)
-		// Gunakan sandbox password check jika sesuai
-		if input.Password != os.Getenv("SANDBOX_OTP_CODE") {
+		// Tidak ada password_hash di DB (user demo/seed).
+		// Hanya izinkan fallback kode sandbox, dan hanya di mode sandbox.
+		if !sandboxPasswordFallback(input.Password) {
 			c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kata sandi salah", nil))
 			return
 		}
