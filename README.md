@@ -34,7 +34,7 @@ Product scope dan kontrak backend resmi tersedia di [`prd.md`](./prd.md).
 
 | Layer | Teknologi |
 |---|---|
-| **Frontend** | React 19, TypeScript, Vite, TailwindCSS, Lucide Icons |
+| **Frontend** | React 19, Vite (JavaScript SPA, CSS kustom) |
 | **Backend** | Go (Golang), Gin Web Framework |
 | **Database** | PostgreSQL, `jackc/pgx/v5` (High-Performance Raw SQL Connection Pool) |
 | **Security** | JWT Authentication, resource-level RBAC |
@@ -79,9 +79,7 @@ Jalankan file SQL DDL yang tersedia untuk menginisialisasi skema tabel:
 # Jalankan berurutan pada database lokal/demo yang kosong
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/000_reset_public_schema.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_schema_v2.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_core_hardening.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/003_seed_demo_data.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/004_audit_events.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_seed_demo_data.sql
 ```
 
 ### 3. Menjalankan Backend
