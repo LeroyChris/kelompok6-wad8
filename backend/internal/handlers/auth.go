@@ -1,12 +1,17 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log"
+	"math/big"
 	"net/http"
 	"net/smtp"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"backend-arisankita/internal/dto"
@@ -15,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
-	"log"
 )
 
 // SMTPConfig konfigurasi SMTP untuk pengiriman OTP
@@ -48,14 +52,28 @@ type LoginDTO struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
+// otpTTL adalah masa berlaku kode OTP.
+const otpTTL = 5 * time.Minute
+
+// otpEntry menyimpan kode OTP beserta waktu kedaluwarsanya.
+type otpEntry struct {
+	code    string
+	expires time.Time
+}
+
 // AuthHandler struct dengan SMTP config
 type AuthHandler struct {
-	DB  *pgxpool.Pool
+	DB   *pgxpool.Pool
 	SMTP SMTPConfig
+
+	otpMu    sync.Mutex
+	otpCodes map[string]otpEntry
 }
 
 // NewAuthHandler membuat handler otentikasi baru
 func NewAuthHandler(db *pgxpool.Pool) *AuthHandler {
+	handler := &AuthHandler{DB: db, otpCodes: make(map[string]otpEntry)}
+
 	// Load SMTP config dari environment
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPort := 587 // default port
@@ -70,20 +88,18 @@ func NewAuthHandler(db *pgxpool.Pool) *AuthHandler {
 	if smtpHost == "" {
 		// Jika SMTP tidak dikonfigurasi, handler akan berjalan di mode sandbox
 		log.Printf("[WARN] SMTP not configured; running in sandbox mode for OTP")
-		return &AuthHandler{DB: db}
+		return handler
 	}
 
-	return &AuthHandler{
-		DB:  db,
-		SMTP: SMTPConfig{
-			Host:     smtpHost,
-			Port:     smtpPort,
-			Username: smtpUser,
-			Password: smtpPass,
-			FromName: fromName,
-			FromAddr: fromAddr,
-		},
+	handler.SMTP = SMTPConfig{
+		Host:     smtpHost,
+		Port:     smtpPort,
+		Username: smtpUser,
+		Password: smtpPass,
+		FromName: fromName,
+		FromAddr: fromAddr,
 	}
+	return handler
 }
 
 // sandboxOTPCode kode OTP sandbox
@@ -97,6 +113,44 @@ func sandboxOTPCode() string {
 // sandboxEnabled cek apakah mode sandbox aktif
 func sandboxEnabled() bool {
 	return !strings.EqualFold(os.Getenv("APP_ENV"), "production")
+}
+
+// randomOTPCode menghasilkan kode OTP 6 digit yang aman secara kriptografis.
+func randomOTPCode() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return fmt.Sprintf("%06d", time.Now().UnixNano()%1000000)
+	}
+	return fmt.Sprintf("%06d", n.Int64())
+}
+
+// storeOTP menyimpan kode OTP untuk sebuah email dengan masa berlaku otpTTL.
+func (h *AuthHandler) storeOTP(email, code string) {
+	h.otpMu.Lock()
+	defer h.otpMu.Unlock()
+	now := time.Now()
+	for e, entry := range h.otpCodes {
+		if now.After(entry.expires) {
+			delete(h.otpCodes, e)
+		}
+	}
+	h.otpCodes[email] = otpEntry{code: code, expires: now.Add(otpTTL)}
+}
+
+// consumeOTP memvalidasi kode OTP dan hanya menghapusnya saat cocok (sekali pakai).
+func (h *AuthHandler) consumeOTP(email, code string) bool {
+	h.otpMu.Lock()
+	defer h.otpMu.Unlock()
+	entry, ok := h.otpCodes[email]
+	if !ok || time.Now().After(entry.expires) {
+		delete(h.otpCodes, email)
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(entry.code), []byte(code)) != 1 {
+		return false
+	}
+	delete(h.otpCodes, email)
+	return true
 }
 
 // sendOTPEmail mengirim OTP ke email melalui SMTP
@@ -152,12 +206,12 @@ func generateToken(userID, email, role string) (string, string, error) {
 
 	jti := fmt.Sprintf("%d", time.Now().UnixNano())
 	claims := jwt.MapClaims{
-		"user_id":  userID,
-		"email":    email,
-		"role":     role,
-		"jti":      jti,
-		"exp":      time.Now().Add(15 * time.Minute).Unix(),
-		"iat":      time.Now().Unix(),
+		"user_id": userID,
+		"email":   email,
+		"role":    role,
+		"jti":     jti,
+		"exp":     time.Now().Add(15 * time.Minute).Unix(),
+		"iat":     time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -229,8 +283,12 @@ func (h *AuthHandler) RequestEmailOTP(c *gin.Context) {
 		return
 	}
 
-	// Generate OTP code
-	otpCode := fmt.Sprintf("%06d", time.Now().Unix()%1000000)
+	// Generate OTP code: kode sandbox tetap saat mode sandbox, acak saat production.
+	otpCode := randomOTPCode()
+	if sandboxEnabled() {
+		otpCode = sandboxOTPCode()
+	}
+	h.storeOTP(cleanEmail, otpCode)
 
 	// Kirim email via SMTP (atau sandbox mode)
 	if err := h.sendOTPEmail(cleanEmail, otpCode); err != nil {
@@ -258,17 +316,16 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 	cleanEmail := strings.ToLower(strings.TrimSpace(input.Email))
 
-	// Coba verifikasi OTP
-	if !sandboxEnabled() && h.SMTP.Host != "" {
-		// Production: cek dari database/redis (implementasi lanjut)
-		// Untuk saat ini, kita tetap gunakan sandbox check jika SMTP terconfig
-		c.JSON(http.StatusServiceUnavailable, dto.BuildResponse(http.StatusServiceUnavailable, "error", "Validasi OTP dari production belum sepenuhnya diimplementasikan", nil))
-		return
-	}
-
-	// Sandbox mode: langsung cek kode
-	if input.OTPCode != sandboxOTPCode() {
-		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kode OTP tidak valid", nil))
+	// Verifikasi kode OTP.
+	// - Mode sandbox: terima kode sandbox tanpa SMTP.
+	// - Mode production: cocokkan dengan kode yang dikirim via SMTP lalu hapus.
+	if sandboxEnabled() {
+		if input.OTPCode != sandboxOTPCode() {
+			c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kode OTP tidak valid", nil))
+			return
+		}
+	} else if !h.consumeOTP(cleanEmail, input.OTPCode) {
+		c.JSON(http.StatusUnauthorized, dto.BuildResponse(http.StatusUnauthorized, "error", "Kode OTP tidak valid atau telah kedaluwarsa", nil))
 		return
 	}
 
@@ -292,8 +349,8 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Verifikasi OTP Email berhasil", gin.H{
 		"token": gin.H{
-			"access":  accessToken,
-			"refresh": "",
+			"access":     accessToken,
+			"refresh":    "",
 			"token_type": "Bearer",
 			"expires_in": 15 * 60, // 15 minutes
 		},
@@ -305,6 +362,7 @@ func (h *AuthHandler) VerifyEmailOTP(c *gin.Context) {
 		"jti": jti,
 	}))
 }
+
 // Login handler untuk login dengan email + password
 func (h *AuthHandler) Login(c *gin.Context) {
 	var input LoginDTO
@@ -361,8 +419,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.BuildResponse(http.StatusOK, "success", "Login berhasil", gin.H{
 		"token": gin.H{
-			"access":  accessToken,
-			"refresh": "",
+			"access":     accessToken,
+			"refresh":    "",
 			"token_type": "Bearer",
 			"expires_in": 15 * 60,
 		},
